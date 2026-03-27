@@ -42,3 +42,4 @@ sites/*/              # User sites (excluded from repo, created at runtime)
 
 # Sites directory — konten runtime, bukan bagian repo
 sites/
+.tunnel.env

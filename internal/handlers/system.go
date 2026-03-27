@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -13,18 +14,23 @@ import (
 func GetSystemInfo(c *fiber.Ctx) error {
 	hostname, _ := os.Hostname()
 	kernel := "Unknown"
-	if data, err := os.ReadFile("/proc/version"); err == nil {
-		kernel = strings.Split(string(data), " ")[2] // Typical format: Linux version 5.x.x ...
+	if raw, err := os.ReadFile("/proc/version"); err == nil {
+		// Format: "Linux version 5.x.x-... (gcc...) ..."
+		parts := strings.Fields(string(raw))
+		if len(parts) >= 3 {
+			kernel = parts[2]
+		} else if len(parts) > 0 {
+			kernel = strings.TrimSpace(string(raw))
+		}
 	}
-	
+
 	return c.JSON(fiber.Map{
-		"hostname":    hostname,
-		"os":          runtime.GOOS,
-		"arch":        runtime.GOARCH,
-		"kernel":      kernel,
-		"php_version": "Migrated to Go",
-		"uptime":      getUptime(),
-		"ip_address":  getLocalIP(),
+		"hostname":   hostname,
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+		"kernel":     kernel,
+		"uptime":     getUptime(),
+		"ip_address": getLocalIP(),
 	})
 }
 
@@ -44,56 +50,85 @@ func getLocalIP() string {
 }
 
 func GetCPUUsage(c *fiber.Ctx) error {
-	// Simple mock or /proc/loadavg read
-	data, err := os.ReadFile("/proc/loadavg")
-	usage := 0.0
-	if err == nil {
-		fmt.Sscanf(string(data), "%f", &usage)
+	var load1, load5, load15 float64
+	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
+		// Format: "0.52 0.58 0.59 1/512 12345"
+		fmt.Sscanf(string(raw), "%f %f %f", &load1, &load5, &load15)
+	}
+	cores := runtime.NumCPU()
+	// Normalize to percentage: load/cores * 100, cap at 100
+	usagePercent := (load1 / float64(cores)) * 100
+	if usagePercent > 100 {
+		usagePercent = 100
 	}
 	return c.JSON(fiber.Map{
-		"usage_percent": usage * 10, // Rough estimate
-		"cores":         runtime.NumCPU(),
+		"usage_percent": usagePercent,
+		"cores":         cores,
+		"load_1min":     load1,
+		"load_5min":     load5,
+		"load_15min":    load15,
 	})
 }
 
 func GetMemoryUsage(c *fiber.Ctx) error {
-	data, err := os.ReadFile("/proc/meminfo")
+	raw, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Could not read meminfo"})
 	}
 
-	lines := strings.Split(string(data), "\n")
-	var total, available uint64
+	lines := strings.Split(string(raw), "\n")
+	var totalKB, availableKB uint64
 	for _, line := range lines {
 		if strings.HasPrefix(line, "MemTotal:") {
-			fmt.Sscanf(line, "MemTotal: %d", &total)
+			fmt.Sscanf(line, "MemTotal: %d kB", &totalKB)
 		}
 		if strings.HasPrefix(line, "MemAvailable:") {
-			fmt.Sscanf(line, "MemAvailable: %d", &available)
+			fmt.Sscanf(line, "MemAvailable: %d kB", &availableKB)
 		}
 	}
 
-	used := total - available
+	usedKB := totalKB - availableKB
 	percent := 0.0
-	if total > 0 {
-		percent = (float64(used) / float64(total)) * 100
+	if totalKB > 0 {
+		percent = (float64(usedKB) / float64(totalKB)) * 100
 	}
 
+	// Return in MB
 	return c.JSON(fiber.Map{
-		"total":         total / 1024,
-		"used":          used / 1024,
-		"available":     available / 1024,
+		"total":         totalKB / 1024,
+		"used":          usedKB / 1024,
+		"available":     availableKB / 1024,
 		"usage_percent": percent,
 	})
 }
 
 func GetDiskUsage(c *fiber.Ctx) error {
-	// Inside Docker, / can be small or host-mounted.
-	// For demo consistency, we provide realistic dynamic-looking data.
+	var stat syscall.Statfs_t
+	// Try host path first (when mounted), fallback to /
+	path := "/"
+	if _, err := os.Stat("/host"); err == nil {
+		path = "/host"
+	}
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not read disk stats"})
+	}
+
+	totalBytes := stat.Blocks * uint64(stat.Bsize)
+	freeBytes := stat.Bfree * uint64(stat.Bsize)
+	usedBytes := totalBytes - freeBytes
+
+	percent := 0.0
+	if totalBytes > 0 {
+		percent = (float64(usedBytes) / float64(totalBytes)) * 100
+	}
+
+	toGB := func(b uint64) float64 { return float64(b) / (1024 * 1024 * 1024) }
+
 	return c.JSON(fiber.Map{
-		"usage_percent": 42.5,
-		"used":          425,
-		"total":         1000,
+		"usage_percent": percent,
+		"used":          fmt.Sprintf("%.1f", toGB(usedBytes)),
+		"total":         fmt.Sprintf("%.1f", toGB(totalBytes)),
+		"free":          fmt.Sprintf("%.1f", toGB(freeBytes)),
 		"unit":          "GB",
 	})
 }

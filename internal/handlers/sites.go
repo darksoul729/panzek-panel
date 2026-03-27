@@ -20,17 +20,33 @@ func ListSites(c *fiber.Ctx) error {
 	var results []SiteWithIP
 	for _, s := range sites {
 		ip := ""
-		if s.Status == "active" || s.Status == "online" {
-			// Container name convention: site-<ID>-web-1 (Note: project name is site-<ID>)
-			// Wait, in deploy.go I use safeName := fmt.Sprintf("site-%d", s.ID)
-			// So container name is site-<ID>-web-1
-			containerName := fmt.Sprintf("site-%d-web-1", s.ID)
+		currentStatus := s.Status // Default to DB status
 
-			cmd := exec.Command("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerName)
-			if out, err := cmd.Output(); err == nil {
-				ip = strings.TrimSpace(string(out))
+		// Container name convention: site-<ID>-web-1
+		containerName := fmt.Sprintf("site-%d-web-1", s.ID)
+
+		// Check container state and IP
+		// We query both State.Running and IPAddress
+		format := "{{.State.Running}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
+		cmd := exec.Command("docker", "inspect", "-f", format, containerName)
+		if out, err := cmd.Output(); err == nil {
+			parts := strings.Split(strings.TrimSpace(string(out)), "|")
+			if len(parts) >= 2 {
+				isRunning := parts[0] == "true"
+				ip = parts[1]
+
+				if isRunning {
+					currentStatus = "online"
+				} else {
+					currentStatus = "stopped"
+				}
 			}
+		} else {
+			// Container doesn't exist
+			currentStatus = "offline"
 		}
+
+		s.Status = currentStatus
 		results = append(results, SiteWithIP{Site: s, IP: ip})
 	}
 
