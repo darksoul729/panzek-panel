@@ -1,0 +1,101 @@
+services:
+  traefik:
+    image: traefik:latest
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik/traefik.yml:/etc/traefik/traefik.yml:ro"
+      - "./traefik/dynamic:/etc/traefik/dynamic:ro"
+    environment:
+      - DOCKER_API_VERSION=1.40
+    networks:
+      - panel-network
+
+  app:
+    build: .
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.panel.rule=Host(`panel.localhost`)"
+      - "traefik.http.services.panel.loadbalancer.server.port=3000"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "${PWD}/sites:/var/www"
+      - ".:/app_config"
+    ports:
+      - "3000:3000"
+    environment:
+      - PANEL_DB_HOST=db
+      - PANEL_DB_USER=panel
+      - PANEL_DB_PASSWORD=panel_secret
+      - PANEL_DB_NAME=homeserver
+      - PANEL_DB_PORT=5432
+      - MYSQL_ROOT_PASSWORD=root_secret
+      - MYSQL_HOST=mysql
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - panel-network
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=panel
+      - POSTGRES_PASSWORD=panel_secret
+      - POSTGRES_DB=homeserver
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U panel -d homeserver"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - panel-network
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:3000/api
+    networks:
+      - panel-network
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_secret
+    ports:
+      - "3310:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - panel-network
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    env_file:
+      - .tunnel.env
+    restart: always
+    depends_on:
+      - traefik
+    networks:
+      - panel-network
+
+networks:
+  panel-network:
+    name: panel-network
+
+volumes:
+  postgres_data:
+  mysql_data:

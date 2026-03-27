@@ -1,0 +1,22 @@
+[PHP]
+; Enable SQLite extensions
+extension=pdo_sqlite
+extension=sqlite3
+
+; Error reporting for development
+error_reporting = E_ALL
+display_errors = On
+display_startup_errors = On
+
+; Timezone
+date.timezone = Asia/Jakarta
+
+; File uploads
+upload_max_filesize = 100M
+post_max_size = 100M
+
+; Memory limit
+memory_limit = 256M
+
+; Execution time
+max_execution_time = 300

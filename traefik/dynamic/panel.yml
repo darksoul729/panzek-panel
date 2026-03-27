@@ -1,0 +1,13 @@
+http:
+  routers:
+    panel:
+      rule: "PathPrefix(`/`)"
+      service: panel-service
+      entryPoints:
+        - web
+
+  services:
+    panel-service:
+      loadBalancer:
+        servers:
+          - url: "http://app:3000"

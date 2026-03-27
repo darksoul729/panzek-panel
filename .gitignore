@@ -1,0 +1,44 @@
+# Database
+data/*.db
+data/*.db-journal
+
+# Logs
+logs/*.log
+logs/*.txt
+
+# Backups
+data/backups/*
+
+# Configuration overrides
+config/config.local.php
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.cache
+
+# ─── SECRETS — jangan pernah di-commit ke repo publik ─────────────────────────
+.tunnel.env           # Cloudflare Tunnel token
+.env                  # Database passwords & env vars
+.credentials          # Generated credentials file
+
+# ─── Build artifacts ──────────────────────────────────────────────────────────
+panel-server          # Go binary hasil build
+frontend/dist/        # React production build
+frontend/node_modules/
+
+# ─── Docker runtime data ──────────────────────────────────────────────────────
+sites/*/              # User sites (excluded from repo, created at runtime)
+
+# Sites directory — konten runtime, bukan bagian repo
+sites/

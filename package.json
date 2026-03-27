@@ -1,0 +1,17 @@
+{
+  "name": "home-server-panel",
+  "version": "1.0.0",
+  "description": "Home Server Control Panel",
+  "scripts": {
+    "dev": "bash dev-server.sh",
+    "start": "bash dev-server.sh",
+    "serve": "php -S localhost:8000 -t web/"
+  },
+  "keywords": [
+    "home-server",
+    "control-panel",
+    "server-management"
+  ],
+  "author": "",
+  "license": "MIT"
+}
