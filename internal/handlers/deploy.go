@@ -248,7 +248,7 @@ networks:
 		defer f.Close()
 		
 		fmt.Fprintf(f, "[%s] Starting Composer Install...\n", time.Now().Format(time.RFC3339))
-		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--no-dev")
+		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--no-dev", "--ignore-platform-reqs")
 		compCmd.Dir = targetDir
 		compCmd.Stdout = f
 		compCmd.Stderr = f
