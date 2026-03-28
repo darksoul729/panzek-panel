@@ -139,7 +139,7 @@ func performDeployment(s *data.Site) error {
 	if s.Type == "laravel" {
 		composeContent = fmt.Sprintf(`services:
   web:
-    image: webdevops/php-apache:8.3
+    image: webdevops/php-apache:8.4
     environment:
       - WEB_DOCUMENT_ROOT=/app/public
       - WEB_DOCUMENT_INDEX=index.php

@@ -250,7 +250,10 @@ func ControlSite(c *fiber.Ctx) error {
 				f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 				fmt.Fprintf(f, "[%s] Vendor missing. Running Composer Install INSIDE container...\n", time.Now().Format(time.RFC3339))
 				
-				compCmd := exec.Command("docker", "exec", "-w", "/app", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
+				// Fix dubious ownership for git inside container
+				exec.Command("docker", "exec", containerName, "git", "config", "--global", "--add", "safe.directory", "/app").Run()
+				
+				compCmd := exec.Command("docker", "exec", "-w", "/app", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--ignore-platform-reqs")
 				compCmd.Stdout = f
 				compCmd.Stderr = f
 				compCmd.Run()
