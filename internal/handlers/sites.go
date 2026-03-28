@@ -146,6 +146,17 @@ func GetSiteLogs(c *fiber.Ctx) error {
 			} else {
 				fullLogs = append(fullLogs, "OK: 'index.php' found.")
 			}
+			
+			// Check .htaccess
+			htaccessPath := filepath.Join(publicPath, ".htaccess")
+			if _, err := os.Stat(htaccessPath); err == nil {
+				fullLogs = append(fullLogs, "OK: '.htaccess' found. Inspecting content...")
+				content, _ := os.ReadFile(htaccessPath)
+				fullLogs = append(fullLogs, "--- HTACCESS CONTENT ---")
+				fullLogs = append(fullLogs, strings.Split(string(content), "\n")...)
+			} else {
+				fullLogs = append(fullLogs, "WARN: '.htaccess' not found.")
+			}
 		}
 	}
 	
