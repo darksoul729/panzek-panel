@@ -141,11 +141,28 @@ func ControlSite(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid action"})
 	}
 
-	// Use docker compose -p site-<ID> [action]
-	// Note: We assume the directory is still valid for compose to find the file if needed, 
-	// but -p should work for simple controls if the project is already created.
-	// Actually, it's safer to run it from the site directory
-	siteDir := fmt.Sprintf("/var/www/%s", site.Domain)
+	// Use site.Path or default to domain-based path
+	siteDir := site.Path
+	if siteDir == "" {
+		siteDir = fmt.Sprintf("/var/www/%s", site.Domain)
+	}
+
+	// Verify directory exists
+	checkCmd := exec.Command("sh", "-c", fmt.Sprintf("[ -d \"%s\" ]", siteDir))
+	if err := checkCmd.Run(); err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": fmt.Sprintf("Site directory not found: %s. Please ensure files are synced to this server.", siteDir),
+		})
+	}
+
+	// Verify docker-compose.yml exists
+	checkFileCmd := exec.Command("sh", "-c", fmt.Sprintf("[ -f \"%s/docker-compose.yml\" ]", siteDir))
+	if err := checkFileCmd.Run(); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": fmt.Sprintf("docker-compose.yml not found in %s", siteDir),
+		})
+	}
+
 	cmd := exec.Command("docker", "compose", "-p", projectName, action)
 	cmd.Dir = siteDir
 	

@@ -53,6 +53,9 @@ func CloneRepo(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("Git clone failed: %v. Output: %s", err, string(out))})
 	}
 
+	// Set full permissions for Docker
+	exec.Command("chmod", "-R", "777", req.Path).Run()
+
 success:
 	log.Printf("Successfully cloned %s to %s", req.RepoURL, req.Path)
 	// Log activity

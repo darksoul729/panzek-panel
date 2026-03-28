@@ -104,6 +104,9 @@ func performDeployment(s *data.Site) error {
 		}
 	}
 
+	// Set full permissions for Docker to ensure .env and other files can be created
+	exec.Command("chmod", "-R", "777", targetDir).Run()
+
 	// Generate docker-compose.yml for the site
 	safeName := fmt.Sprintf("site-%d", s.ID)
 
