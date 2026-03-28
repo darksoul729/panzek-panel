@@ -126,6 +126,29 @@ func GetSiteLogs(c *fiber.Ctx) error {
 
 	// Also try to read deployment.log if it exists
 	fullLogs := []string{}
+	
+	// Diagnostics
+	fullLogs = append(fullLogs, "--- SYSTEM DIAGNOSTICS ---")
+	if _, err := os.Stat(site.Path); os.IsNotExist(err) {
+		fullLogs = append(fullLogs, fmt.Sprintf("ERROR: Site directory not found at %s", site.Path))
+	} else {
+		fullLogs = append(fullLogs, fmt.Sprintf("OK: Directory exists: %s", site.Path))
+		// Check for public folder
+		publicPath := filepath.Join(site.Path, "public")
+		if _, err := os.Stat(publicPath); os.IsNotExist(err) {
+			fullLogs = append(fullLogs, "ERROR: 'public' folder missing! Laravel needs a public folder to serve.")
+		} else {
+			fullLogs = append(fullLogs, "OK: 'public' folder found.")
+			// Check for index.php
+			indexPath := filepath.Join(publicPath, "index.php")
+			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+				fullLogs = append(fullLogs, "ERROR: 'public/index.php' missing! Apache has nothing to serve (Causes 403).")
+			} else {
+				fullLogs = append(fullLogs, "OK: 'index.php' found.")
+			}
+		}
+	}
+	
 	deployLogPath := filepath.Join(site.Path, "deployment.log")
 	if deployLogData, err := os.ReadFile(deployLogPath); err == nil {
 		fullLogs = append(fullLogs, "--- DEPLOYMENT LOGS ---")
@@ -134,6 +157,16 @@ func GetSiteLogs(c *fiber.Ctx) error {
 	}
 
 	fullLogs = append(fullLogs, strings.Split(string(output), "\n")...)
+	
+	// Add runtime check from container perspective
+	for _, containerName := range patterns {
+		lsCmd := exec.Command("docker", "exec", containerName, "ls", "-la", "/app/public")
+		if lsOut, err := lsCmd.CombinedOutput(); err == nil {
+			fullLogs = append(fullLogs, "--- CONTAINER FILE VIEW (/app/public) ---")
+			fullLogs = append(fullLogs, strings.Split(string(lsOut), "\n")...)
+		}
+	}
+
 	return c.JSON(fiber.Map{"logs": fullLogs})
 }
 
