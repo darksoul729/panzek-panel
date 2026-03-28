@@ -167,9 +167,9 @@ func ControlSite(c *fiber.Ctx) error {
 	cmd.Dir = siteDir
 	
 	if out, err := cmd.CombinedOutput(); err != nil {
+		// Include output in the error so the frontend popup shows the real reason
 		return c.Status(500).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to %s site: %v", action, err),
-			"output": string(out),
+			"error": fmt.Sprintf("Failed to %s site: %v. Docker Output: %s", action, err, string(out)),
 		})
 	}
 
