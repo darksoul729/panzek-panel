@@ -250,7 +250,7 @@ func ControlSite(c *fiber.Ctx) error {
 				f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 				fmt.Fprintf(f, "[%s] Vendor missing. Running Composer Install INSIDE container...\n", time.Now().Format(time.RFC3339))
 				
-				compCmd := exec.Command("docker", "exec", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
+				compCmd := exec.Command("docker", "exec", "-w", "/app", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
 				compCmd.Stdout = f
 				compCmd.Stderr = f
 				compCmd.Run()
@@ -261,7 +261,7 @@ func ControlSite(c *fiber.Ctx) error {
 			}
 			
 			// Ensure APP_KEY is generated if still empty
-			exec.Command("docker", "exec", containerName, "php", "artisan", "key:generate", "--force").Run()
+			exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force").Run()
 		}
 	}
 
