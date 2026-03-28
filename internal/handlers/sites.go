@@ -163,7 +163,15 @@ func ControlSite(c *fiber.Ctx) error {
 		})
 	}
 
-	cmd := exec.Command("docker", "compose", "-p", projectName, action)
+	dockerAction := action
+	var args []string
+	if action == "start" {
+		dockerAction = "up"
+		args = []string{"-d"}
+	}
+	
+	cmdArgs := append([]string{"compose", "-p", projectName, dockerAction}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Dir = siteDir
 	
 	if out, err := cmd.CombinedOutput(); err != nil {
