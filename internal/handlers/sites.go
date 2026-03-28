@@ -179,6 +179,9 @@ func ControlSite(c *fiber.Ctx) error {
 	if action == "start" {
 		dockerAction = "up"
 		args = []string{"-d"}
+		
+		// Auto-Fix permissions before starting
+		exec.Command("chmod", "-R", "777", siteDir).Run()
 	}
 	
 	cmdArgs := append([]string{"compose", "-p", projectName, dockerAction}, args...)
