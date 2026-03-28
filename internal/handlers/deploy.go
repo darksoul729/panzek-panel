@@ -38,6 +38,10 @@ func DeploySite(c *fiber.Ctx) error {
 	site.Status = "deploying"
 	data.DB.Save(&site)
 
+	// Create/Clear deployment log
+	logFile := filepath.Join("/var/www", site.Path, "deployment.log")
+	os.Remove(logFile) // Start fresh
+	
 	// Run deployment in background
 	go func(s data.Site) {
 		err := performDeployment(&s)
@@ -184,10 +188,18 @@ networks:
 		}
 
 		log.Printf("[Deploy] Running composer install...\n")
-		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
+		// Log to file for user visibility
+		logFile := filepath.Join(targetDir, "deployment.log")
+		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		defer f.Close()
+		
+		fmt.Fprintf(f, "[%s] Starting Composer Install...\n", time.Now().Format(time.RFC3339))
+		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--no-dev")
 		compCmd.Dir = targetDir
-		if out, err := compCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("composer failed (folder created but install failed): %v\nOutput: %s", err, string(out))
+		compCmd.Stdout = f
+		compCmd.Stderr = f
+		if err := compCmd.Run(); err != nil {
+			return fmt.Errorf("composer failed. See deployment.log for details: %v", err)
 		}
 
 		envFile := filepath.Join(targetDir, ".env")
@@ -226,33 +238,55 @@ networks:
 		return fmt.Errorf("docker compose failed: %v\nOutput: %s", err, string(out))
 	}
 
-	// 2. Post-UP container configuration (Commands inside container)
+	// 3. Post-UP container configuration (Commands inside container)
 	if s.Type == "laravel" {
 		containerName := fmt.Sprintf("%s-web-1", safeName)
 		
-		log.Printf("[Deploy] Fixing permissions inside container %s...\n", containerName)
-		exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app").Run()
+		logFile := filepath.Join(targetDir, "deployment.log")
+		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		defer f.Close()
 
-		log.Printf("[Deploy] Generating artisan key inside container...\n")
-		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force").Run()
+		fmt.Fprintf(f, "[%s] Fixing permissions inside container %s...\n", time.Now().Format(time.RFC3339), containerName)
+		cmdPerms := exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app")
+		cmdPerms.Stdout = f
+		cmdPerms.Stderr = f
+		cmdPerms.Run()
 
-		log.Printf("[Deploy] Running migrations inside container...\n")
-		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "migrate", "--force").Run()
+		fmt.Fprintf(f, "[%s] Generating artisan key...\n", time.Now().Format(time.RFC3339))
+		cmdKey := exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force")
+		cmdKey.Stdout = f
+		cmdKey.Stderr = f
+		cmdKey.Run()
+
+		fmt.Fprintf(f, "[%s] Running migrations...\n", time.Now().Format(time.RFC3339))
+		cmdMigrate := exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "migrate", "--force")
+		cmdMigrate.Stdout = f
+		cmdMigrate.Stderr = f
+		cmdMigrate.Run()
 
 		// Run NPM if build is needed
 		pkgJson := filepath.Join(targetDir, "package.json")
 		if _, err := os.Stat(pkgJson); err == nil {
-			log.Printf("[Deploy] Running npm steps inside container...\n")
-			exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "install", "--no-audit", "--no-fund").Run()
-			exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "run", "build").Run()
+			fmt.Fprintf(f, "[%s] Running npm install (this can take high time)...\n", time.Now().Format(time.RFC3339))
+			cmdNpmInstall := exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "install", "--no-audit", "--no-fund")
+			cmdNpmInstall.Stdout = f
+			cmdNpmInstall.Stderr = f
+			cmdNpmInstall.Run()
+			
+			fmt.Fprintf(f, "[%s] Running npm run build...\n", time.Now().Format(time.RFC3339))
+			cmdNpmBuild := exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "run", "build")
+			cmdNpmBuild.Stdout = f
+			cmdNpmBuild.Stderr = f
+			cmdNpmBuild.Run()
 		}
 
-		log.Printf("[Deploy] Fixing symlinks and storage inside container...\n")
+		fmt.Fprintf(f, "[%s] Fixing symlinks and storage...\n", time.Now().Format(time.RFC3339))
 		exec.Command("docker", "exec", "-w", "/app", containerName, "rm", "-rf", "public/storage").Run()
 		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "storage:link").Run()
 		
 		// Set correct 775 permissions
 		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "775", "/app/storage", "/app/bootstrap/cache").Run()
+		fmt.Fprintf(f, "[%s] Deployment complete!\n", time.Now().Format(time.RFC3339))
 	}
 
 	// 3. Post-Deployment Optimization: Cloudflare Tunnel & DNS

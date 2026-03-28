@@ -118,11 +118,20 @@ func GetSiteLogs(c *fiber.Ctx) error {
 	}
 	
 	if err != nil {
-		return c.JSON(fiber.Map{"logs": []string{"Container not found (tried hyphen and underscore)", err.Error()}})
+		output = []byte("Container not found (tried hyphen and underscore)\n" + err.Error())
 	}
 
-	lines := strings.Split(string(output), "\n")
-	return c.JSON(fiber.Map{"logs": lines})
+	// Also try to read deployment.log if it exists
+	fullLogs := []string{}
+	deployLogPath := filepath.Join(site.Path, "deployment.log")
+	if deployLogData, err := os.ReadFile(deployLogPath); err == nil {
+		fullLogs = append(fullLogs, "--- DEPLOYMENT LOGS ---")
+		fullLogs = append(fullLogs, strings.Split(string(deployLogData), "\n")...)
+		fullLogs = append(fullLogs, "--- CONTAINER LOGS ---")
+	}
+
+	fullLogs = append(fullLogs, strings.Split(string(output), "\n")...)
+	return c.JSON(fiber.Map{"logs": fullLogs})
 }
 
 func ControlSite(c *fiber.Ctx) error {
