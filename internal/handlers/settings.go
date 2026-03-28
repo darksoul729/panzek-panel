@@ -69,7 +69,8 @@ func writeTunnelEnv(token string) {
 }
 
 func RestartCloudflareTunnel(c *fiber.Ctx) error {
-	cmd := exec.Command("docker", "compose", "restart", "tunnel")
+	// We use 'up -d --force-recreate' instead of 'restart' to ensure .tunnel.env is reloaded
+	cmd := exec.Command("docker", "compose", "up", "-d", "--force-recreate", "tunnel")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("Failed to restart tunnel: %v, output: %s", err, string(out))})
 	}
