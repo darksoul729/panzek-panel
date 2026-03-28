@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -196,15 +198,39 @@ networks:
 				input, _ := os.ReadFile(exampleEnv)
 				content = string(input)
 			} else {
-				content = "APP_NAME=Laravel\nAPP_ENV=production\nAPP_DEBUG=false\nAPP_URL=https://" + s.Domain + "\n\nDB_CONNECTION=mysql\nDB_HOST=mysql\nDB_PORT=3306\n"
+				content = "APP_NAME=Laravel\nAPP_ENV=production\nAPP_DEBUG=true\nAPP_URL=https://" + s.Domain + "\n\nDB_CONNECTION=mysql\nDB_HOST=mysql\nDB_PORT=3306\n"
+			}
+
+			// Generate and inject APP_KEY if missing or empty
+			if !strings.Contains(content, "APP_KEY=") || strings.Contains(content, "APP_KEY=\n") || strings.HasSuffix(content, "APP_KEY=") {
+				// Generate random key: base64:32bytes
+				keyBytes := make([]byte, 32)
+				if _, err := rand.Read(keyBytes); err == nil {
+					key := "base64:" + base64.StdEncoding.EncodeToString(keyBytes)
+					if strings.Contains(content, "APP_KEY=") {
+						content = strings.Replace(content, "APP_KEY=", "APP_KEY="+key, 1)
+					} else {
+						content = "APP_KEY=" + key + "\n" + content
+					}
+				}
+			}
+
+			// Ensure debug is ON for troubleshooting
+			if strings.Contains(content, "APP_DEBUG=") {
+				content = strings.Replace(content, "APP_DEBUG=false", "APP_DEBUG=true", 1)
+			} else {
+				content += "\nAPP_DEBUG=true"
 			}
 			content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
 			content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
+			
 			if s.DbName != "" {
 				content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
+				content = strings.Replace(content, "DB_DATABASE=\"laravel\"", "DB_DATABASE=\""+s.DbName+"\"", 1)
 			}
 			if s.DbUser != "" {
 				content = strings.Replace(content, "DB_USERNAME=root", "DB_USERNAME="+s.DbUser, 1)
+				content = strings.Replace(content, "DB_USERNAME=\"root\"", "DB_USERNAME=\""+s.DbUser+"\"", 1)
 			}
 			if s.DbPassword != "" {
 				content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD="+s.DbPassword, 1)
