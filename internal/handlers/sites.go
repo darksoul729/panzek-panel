@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"home-server-panel/internal/data"
 	"github.com/gofiber/fiber/v2"
 )
@@ -176,23 +177,42 @@ func ControlSite(c *fiber.Ctx) error {
 
 	dockerAction := action
 	var args []string
-	if action == "start" {
+	if action == "start" || action == "restart" {
 		dockerAction = "up"
 		args = []string{"-d"}
 		
-		// Auto-Fix permissions before starting
+		// 1. Repair host-side permissions (Nuclear)
 		exec.Command("chmod", "-R", "777", siteDir).Run()
 	}
 	
 	cmdArgs := append([]string{"compose", "-p", projectName, dockerAction}, args...)
+	if action == "restart" {
+		cmdArgs = []string{"compose", "-p", projectName, "restart"}
+	}
+	
 	cmd := exec.Command("docker", cmdArgs...)
 	cmd.Dir = siteDir
 	
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// Include output in the error so the frontend popup shows the real reason
 		return c.Status(500).JSON(fiber.Map{
-			"error": fmt.Sprintf("Failed to %s site: %v. Docker Output: %s", action, err, string(out)),
+			"error": fmt.Sprintf("Failed to %s site: %v. Output: %s", action, err, string(out)),
 		})
+	}
+
+	// 2. Repair container-side permissions (Post-Start)
+	if action == "start" || action == "restart" {
+		containerName := projectName + "-web-1"
+		// Wait a bit for container to be ready
+		time.Sleep(2 * time.Second)
+		
+		// Fix ownership and permissions inside container as root
+		exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app").Run()
+		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/storage", "/app/bootstrap/cache").Run()
+		
+		// Ensure APP_KEY is generated if still empty (Final safety net)
+		if site.Type == "laravel" {
+			exec.Command("docker", "exec", containerName, "php", "artisan", "key:generate", "--force").Run()
+		}
 	}
 
 	// Update status in DB
@@ -204,9 +224,9 @@ func ControlSite(c *fiber.Ctx) error {
 
 	data.DB.Create(&data.ActivityLog{
 		Action:      "site." + action,
-		Description: fmt.Sprintf("Performed %s on site: %s", action, site.Domain),
+		Description: fmt.Sprintf("Performed %s and Permission Repair on site: %s", action, site.Domain),
 		UserID:      1,
 	})
 
-	return c.JSON(fiber.Map{"success": true, "message": fmt.Sprintf("Site %sed successfully", action)})
+	return c.JSON(fiber.Map{"success": true, "message": fmt.Sprintf("Site %sed and permissions repaired", action)})
 }
