@@ -1,11 +1,21 @@
-FROM golang:1.22-alpine AS builder
+# Stage 1: Build Frontend
+FROM node:20-alpine AS frontend-builder
 WORKDIR /app
-COPY go.mod ./
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm install
+COPY frontend ./frontend
+COPY web ./web
+RUN cd frontend && npm run build
+
+# Stage 2: Build Go Backend
+FROM golang:1.22-alpine AS go-builder
+WORKDIR /app
+COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o main cmd/server/main.go
 
-# Run Backend
+# Stage 3: Final Runtime
 FROM alpine:latest
 RUN apk add --no-cache \
     git \
@@ -40,7 +50,8 @@ RUN apk add --no-cache \
 RUN ln -sf /usr/bin/php83 /usr/bin/php
 
 WORKDIR /root/
-COPY --from=builder /app/main .
-COPY web ./web
+COPY --from=go-builder /app/main .
+COPY --from=frontend-builder /app/web ./web
+
 EXPOSE 3000
 CMD ["./main"]
