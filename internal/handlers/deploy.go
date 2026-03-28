@@ -240,23 +240,8 @@ networks:
 			os.WriteFile(envFile, []byte(content), 0644)
 			exec.Command("chmod", "-R", "777", targetDir).Run()
 		}
-
-		// 3. RUN COMPOSER
-		log.Printf("[Deploy] Running composer install...\n")
-		logFile := filepath.Join(targetDir, "deployment.log")
-		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		defer f.Close()
 		
-		fmt.Fprintf(f, "[%s] Starting Composer Install...\n", time.Now().Format(time.RFC3339))
-		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--no-dev", "--ignore-platform-reqs")
-		compCmd.Dir = targetDir
-		compCmd.Stdout = f
-		compCmd.Stderr = f
-		if err := compCmd.Run(); err != nil {
-			return fmt.Errorf("composer failed. See deployment.log for details: %v", err)
-		}
-		
-		log.Printf("[Deploy] Artisan commands and Node steps will be deferred until container is UP.\n")
+		log.Printf("[Deploy] Build steps for %s will be handled inside the container.\n", s.Domain)
 	}
 
 	// 3. SPIN UP CONTAINER

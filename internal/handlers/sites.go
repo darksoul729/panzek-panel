@@ -236,14 +236,31 @@ func ControlSite(c *fiber.Ctx) error {
 	if action == "start" || action == "restart" {
 		containerName := projectName + "-web-1"
 		// Wait a bit for container to be ready
-		time.Sleep(2 * time.Second)
+		time.Sleep(3 * time.Second)
 		
 		// Fix ownership and permissions inside container as root
 		exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app").Run()
 		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/storage", "/app/bootstrap/cache").Run()
 		
-		// Ensure APP_KEY is generated if still empty (Final safety net)
+		// Check for vendor folder and run composer if missing
 		if site.Type == "laravel" {
+			vendorPath := filepath.Join(siteDir, "vendor")
+			if _, err := os.Stat(vendorPath); os.IsNotExist(err) {
+				logFile := filepath.Join(siteDir, "deployment.log")
+				f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				fmt.Fprintf(f, "[%s] Vendor missing. Running Composer Install INSIDE container...\n", time.Now().Format(time.RFC3339))
+				
+				compCmd := exec.Command("docker", "exec", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
+				compCmd.Stdout = f
+				compCmd.Stderr = f
+				compCmd.Run()
+				f.Close()
+				
+				// Fix permissions again after composer
+				exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/vendor", "/app/storage").Run()
+			}
+			
+			// Ensure APP_KEY is generated if still empty
 			exec.Command("docker", "exec", containerName, "php", "artisan", "key:generate", "--force").Run()
 		}
 	}
