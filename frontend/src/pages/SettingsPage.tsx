@@ -19,6 +19,7 @@ const SettingsPage = () => {
         cf_api_token: '',
         cf_account_id: '',
     });
+    const [tunnelStatus, setTunnelStatus] = useState({ status: 'disconnected', tunnel_id: '' });
 
     useEffect(() => {
         api.get('/settings').then(res => {
@@ -29,6 +30,16 @@ const SettingsPage = () => {
             });
             if (res.data.cf_api_token) setCfSaved(true);
         });
+
+        // Polling status tunnel
+        const fetchStatus = () => {
+            api.get('/settings/cloudflare/tunnel/status').then(res => {
+                setTunnelStatus(res.data);
+            });
+        };
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 30000);
+        return () => clearInterval(interval);
     }, []);
 
     const handleSave = async () => {
@@ -317,7 +328,7 @@ const SettingsPage = () => {
                                 <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-[0.1em] mt-1">Encrypted Ingress Gateway</p>
                             </div>
                         </div>
-                        {settings?.cf_tunnel_id ? (
+                        {tunnelStatus.status === 'active' ? (
                             <span className="inline-flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-lg">
                                 <Zap size={10} fill="currentColor" /> Active
                             </span>
@@ -327,10 +338,10 @@ const SettingsPage = () => {
                     </div>
 
                     <div className="space-y-6">
-                        {settings?.cf_tunnel_id && (
+                        {tunnelStatus.tunnel_id && (
                             <div className="p-5 bg-neutral-50 rounded-xl border border-neutral-200">
                                 <p className="text-[9px] font-black text-neutral-400 uppercase tracking-[0.2em] mb-1">Tunnel Identifier</p>
-                                <code className="text-sm font-mono text-black block truncate">{settings.cf_tunnel_id}</code>
+                                <code className="text-sm font-mono text-black block truncate">{tunnelStatus.tunnel_id}</code>
                             </div>
                         )}
 

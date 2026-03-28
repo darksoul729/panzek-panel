@@ -20,7 +20,34 @@ func GetSettings(c *fiber.Ctx) error {
 		res[s.Key] = s.Value
 	}
 
-	if len(settings) == 0 {
+	// Auto-sync from .tunnel.env if defined but not in DB
+	if res["cf_tunnel_token"] == "" {
+		if envData, err := os.ReadFile("/app_config/.tunnel.env"); err == nil {
+			lines := strings.Split(string(envData), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "TUNNEL_TOKEN=") {
+					token := strings.TrimPrefix(line, "TUNNEL_TOKEN=")
+					data.DB.Where("key = ?", "cf_tunnel_token").Assign(data.PanelSetting{Value: token}).FirstOrCreate(&data.PanelSetting{Key: "cf_tunnel_token"})
+					res["cf_tunnel_token"] = token
+					
+					// Also try to extract Tunnel ID from token if it's base64 encoded JSON
+					if decoded, err := base64.StdEncoding.DecodeString(token); err == nil {
+						if strings.Contains(string(decoded), "TunnelID") {
+							// Simple extraction logic
+							parts := strings.Split(string(decoded), `"TunnelID":"`)
+							if len(parts) > 1 {
+								id := strings.Split(parts[1], `"`)[0]
+								data.DB.Where("key = ?", "cf_tunnel_id").Assign(data.PanelSetting{Value: id}).FirstOrCreate(&data.PanelSetting{Key: "cf_tunnel_id"})
+								res["cf_tunnel_id"] = id
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(settings) == 0 && len(res) == 0 {
 		return c.JSON(fiber.Map{
 			"panel_name": "Panzek Panel",
 			"version":    "2.0.0",
@@ -128,6 +155,29 @@ func SetupCloudflareTunnel(c *fiber.Ctx) error {
 		"tunnel_id": tunnelID,
 		"token":     token,
 		"message":   "Tunnel created successfully. Environment updated.",
+	})
+}
+
+func GetTunnelStatus(c *fiber.Ctx) error {
+	// Check if container exists and is running
+	cmd := exec.Command("docker", "inspect", "-f", "{{.State.Status}}", "home-server-panel-tunnel-1")
+	out, err := cmd.Output()
+	
+	status := "disconnected"
+	if err == nil {
+		dockerStatus := strings.TrimSpace(string(out))
+		if dockerStatus == "running" {
+			status = "active"
+		}
+	}
+
+	// Try to get tunnel ID from DB as fallback for the UI
+	var tunnelIDSetting data.PanelSetting
+	data.DB.Where("key = ?", "cf_tunnel_id").First(&tunnelIDSetting)
+
+	return c.JSON(fiber.Map{
+		"status":    status,
+		"tunnel_id": tunnelIDSetting.Value,
 	})
 }
 

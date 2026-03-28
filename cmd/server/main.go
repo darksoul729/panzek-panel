@@ -116,6 +116,7 @@ func main() {
 	settings.Get("/", handlers.GetSettings)
 	settings.Post("/", handlers.UpdateSettings)
 	settings.Post("/cloudflare/tunnel", handlers.SetupCloudflareTunnel)
+	settings.Get("/cloudflare/tunnel/status", handlers.GetTunnelStatus)
 	settings.Post("/cloudflare/tunnel/restart", handlers.RestartCloudflareTunnel)
 	settings.Post("/reset", handlers.ResetDatabase)
 
