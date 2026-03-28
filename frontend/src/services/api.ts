@@ -36,6 +36,7 @@ export const servicesApi = {
 export const sitesApi = {
     list: () => api.get('/sites/list'),
     create: (site: any) => api.post('/sites', site),
+    deploy: (siteId: number) => api.post('/sites/deploy', { site_id: siteId }),
     delete: (id: number) => api.delete(`/sites/${id}`),
     control: (id: number, action: string) => api.post(`/sites/${id}/control?action=${action}`),
 };

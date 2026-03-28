@@ -1,4 +1,4 @@
-# Home Server Panel
+# Panzek Panel
 
 A modern, high-performance web-based control panel for managing your home server, built with Go and React.
 

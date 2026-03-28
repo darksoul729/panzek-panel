@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Home Server Panel — One-Shot Setup Script
+#  Panzek Panel — One-Shot Setup Script
 #  Jalankan: bash setup.sh
 #  Atau dari repo langsung: bash <(curl -fsSL https://raw.githubusercontent.com/YOURUSERNAME/home-server-panel/main/setup.sh)
 # =============================================================================
@@ -84,7 +84,7 @@ print_banner() {
   echo -e "${BOLD}${CYAN}"
   cat << 'EOF'
   ╔═══════════════════════════════════════════════╗
-  ║       🏠  Home Server Panel Installer          ║
+  ║       🏠  Panzek Panel Installer               ║
   ║   Stack: Go · React/Vite · PostgreSQL · MySQL  ║
   ║          Traefik · Docker · Cloudflare         ║
   ╚═══════════════════════════════════════════════╝
@@ -404,7 +404,7 @@ setup_systemd() {
 
   cat > /etc/systemd/system/home-server-panel.service << EOF
 [Unit]
-Description=Home Server Panel (Docker Compose)
+Description=Panzek Panel (Docker Compose)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -439,7 +439,7 @@ final_summary() {
   local CRED_FILE="$INSTALL_DIR/.credentials"
   cat > "$CRED_FILE" << EOF
 # ==========================================
-# Home Server Panel — Credentials
+# Panzek Panel — Credentials
 # Dibuat: $(date)
 # ==========================================
 Panel URL      : http://${SERVER_IP}:${PANEL_PORT}

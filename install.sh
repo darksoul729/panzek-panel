@@ -1,10 +1,10 @@
 #!/bin/bash
-# Home Server Panel Installation Script
+# Panzek Panel Installation Script
 
 set -e
 
 echo "========================================"
-echo "  Home Server Panel - Installation"
+echo "  Panzek Panel - Installation"
 echo "========================================"
 echo ""
 

@@ -163,7 +163,7 @@ func seed() {
 	var settingCount int64
 	DB.Model(&PanelSetting{}).Count(&settingCount)
 	if settingCount == 0 {
-		DB.Create(&PanelSetting{Key: "panel_name", Value: "Home Server Panel"})
+		DB.Create(&PanelSetting{Key: "panel_name", Value: "Panzek Panel"})
 		DB.Create(&PanelSetting{Key: "version", Value: "2.1.0 (Enterprise)"})
 		DB.Create(&PanelSetting{Key: "theme", Value: "light"})
 		DB.Create(&PanelSetting{Key: "debug_mode", Value: "false"})

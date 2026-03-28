@@ -1,4 +1,4 @@
-# Debugging Guide - Home Server Panel
+# Debugging Guide - Panzek Panel
 
 ## Masalah: Halaman Kosong Setelah Login
 

@@ -59,6 +59,9 @@ func CreateSite(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 	
+	if site.Path == "" {
+		site.Path = site.Domain
+	}
 	site.Status = "online"
 	if err := data.DB.Create(&site).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})

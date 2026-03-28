@@ -108,6 +108,11 @@ func performDeployment(s *data.Site) error {
 	safeName := fmt.Sprintf("site-%d", s.ID)
 
 	if s.Type == "laravel" {
+		// Provision MySQL database and user first
+		if err := provisionDatabase(s); err != nil {
+			log.Printf("[Deploy] Database provisioning warning: %v\n", err)
+		}
+
 		log.Printf("[Deploy] Running composer install...\n")
 		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
 		compCmd.Dir = targetDir
@@ -124,6 +129,17 @@ func performDeployment(s *data.Site) error {
 				// Auto-patch DB configuration for the panel environment
 				content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
 				
+				// Enforce HTTPS for APP_URL and ASSET_URL for Cloudflare Tunnel
+				content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
+				if !strings.Contains(content, "ASSET_URL=") {
+					content += fmt.Sprintf("\nASSET_URL=https://%s", s.Domain)
+				} else {
+					// Use a simple replacement if it already exists or just append if logic is complex
+					// For now, appending is safer if we don't know the exact line
+					content += fmt.Sprintf("\nAPP_URL=https://%s", s.Domain)
+				}
+				
+				// Ensure correct DB settings
 				if s.DbName != "" {
 					content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
 				}
@@ -141,54 +157,7 @@ func performDeployment(s *data.Site) error {
 			}
 		}
 
-		log.Printf("[Deploy] Generating artisan key...\n")
-		keyCmd := exec.Command("php", "artisan", "key:generate", "--force")
-		keyCmd.Dir = targetDir
-		if out, err := keyCmd.CombinedOutput(); err != nil {
-			log.Printf("[Deploy] artisan key:generate warning: %v, Output: %s\n", err, string(out))
-		}
-
-		log.Printf("[Deploy] Running migrations...\n")
-		migrateCmd := exec.Command("php", "artisan", "migrate", "--force")
-		migrateCmd.Dir = targetDir
-		if out, err := migrateCmd.CombinedOutput(); err != nil {
-			log.Printf("[Deploy] artisan migrate warning: %v, Output: %s\n", err, string(out))
-		}
-
-		// Node.js Build Steps
-		pkgJson := filepath.Join(targetDir, "package.json")
-		if _, err := os.Stat(pkgJson); err == nil {
-			log.Printf("[Deploy] package.json detected, running npm commands...\n")
-			
-			log.Printf("[Deploy] Running npm install...\n")
-			npmInst := exec.Command("npm", "install", "--no-audit", "--no-fund")
-			npmInst.Dir = targetDir
-			if out, err := npmInst.CombinedOutput(); err != nil {
-				log.Printf("[Deploy] npm install warning: %v, Output: %s\n", err, string(out))
-			}
-
-			log.Printf("[Deploy] Running npm run build...\n")
-			npmBuild := exec.Command("npm", "run", "build")
-			npmBuild.Dir = targetDir
-			if out, err := npmBuild.CombinedOutput(); err != nil {
-				log.Printf("[Deploy] npm run build warning: %v, Output: %s\n", err, string(out))
-			}
-		}
-
-		log.Printf("[Deploy] Creating storage link...\n")
-		linkCmd := exec.Command("php", "artisan", "storage:link")
-		linkCmd.Dir = targetDir
-		if out, err := linkCmd.CombinedOutput(); err != nil {
-			log.Printf("[Deploy] artisan storage:link warning: %v, Output: %s\n", err, string(out))
-		}
-
-		// Fix Laravel permissions
-		log.Printf("[Deploy] Fixing permissions for storage and cache...\n")
-		dirsToFix := []string{"storage", "bootstrap/cache"}
-		for _, d := range dirsToFix {
-			path := filepath.Join(targetDir, d)
-			exec.Command("chmod", "-R", "777", path).Run()
-		}
+		log.Printf("[Deploy] Artisan commands and Node steps will be deferred until container is UP.\n")
 	}
 
 	// Determine hostPath
@@ -250,11 +219,40 @@ networks:
 		return fmt.Errorf("failed to create docker-compose.yml: %v", err)
 	}
 
-	// Spin up container with explicit project name
+	// 1. Spin up container
 	upCmd := exec.Command("docker", "compose", "-p", safeName, "up", "-d", "--build")
 	upCmd.Dir = targetDir
 	if out, err := upCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose failed: %v\nOutput: %s", err, string(out))
+	}
+
+	// 2. Post-UP container configuration (Commands inside container)
+	if s.Type == "laravel" {
+		containerName := fmt.Sprintf("%s-web-1", safeName)
+		
+		log.Printf("[Deploy] Fixing permissions inside container %s...\n", containerName)
+		exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app").Run()
+
+		log.Printf("[Deploy] Generating artisan key inside container...\n")
+		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force").Run()
+
+		log.Printf("[Deploy] Running migrations inside container...\n")
+		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "migrate", "--force").Run()
+
+		// Run NPM if build is needed
+		pkgJson := filepath.Join(targetDir, "package.json")
+		if _, err := os.Stat(pkgJson); err == nil {
+			log.Printf("[Deploy] Running npm steps inside container...\n")
+			exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "install", "--no-audit", "--no-fund").Run()
+			exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "run", "build").Run()
+		}
+
+		log.Printf("[Deploy] Fixing symlinks and storage inside container...\n")
+		exec.Command("docker", "exec", "-w", "/app", containerName, "rm", "-rf", "public/storage").Run()
+		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "storage:link").Run()
+		
+		// Set correct 775 permissions
+		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "775", "/app/storage", "/app/bootstrap/cache").Run()
 	}
 
 	// 3. Post-Deployment Optimization: Cloudflare Tunnel & DNS
@@ -274,6 +272,31 @@ networks:
 			}
 		}
 	}()
+
+	return nil
+}
+
+func provisionDatabase(s *data.Site) error {
+	if s.DbName == "" {
+		return nil // No database requested
+	}
+
+	mysqlContainer := "home-server-panel-mysql-1"
+	rootPassword := "root_secret" // Hardcoded from docker-compose
+
+	// 1. Create Database
+	log.Printf("[DB] Provisioning database %s...\n", s.DbName)
+	createDb := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`;", s.DbName)
+	exec.Command("docker", "exec", "-e", "MYSQL_PWD="+rootPassword, mysqlContainer, "mysql", "-uroot", "-e", createDb).Run()
+
+	// 2. Create User & Grant Privileges
+	if s.DbUser != "" && s.DbPassword != "" {
+		log.Printf("[DB] Provisioning user %s...\n", s.DbUser)
+		// We use standard MySQL CREATE USER + GRANT syntax
+		createPrivs := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'; GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%%'; FLUSH PRIVILEGES;", 
+			s.DbUser, s.DbPassword, s.DbName, s.DbUser)
+		exec.Command("docker", "exec", "-e", "MYSQL_PWD="+rootPassword, mysqlContainer, "mysql", "-uroot", "-e", createPrivs).Run()
+	}
 
 	return nil
 }

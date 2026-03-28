@@ -1,4 +1,4 @@
-# Testing Guide - Home Server Panel
+# Testing Guide - Panzek Panel
 
 ## Development Server
 

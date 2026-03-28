@@ -22,7 +22,7 @@ func GetSettings(c *fiber.Ctx) error {
 
 	if len(settings) == 0 {
 		return c.JSON(fiber.Map{
-			"panel_name": "Home Server Panel",
+			"panel_name": "Panzek Panel",
 			"version":    "2.0.0",
 		})
 	}

@@ -21,7 +21,7 @@ const Terminal = ({ path }: TerminalProps) => {
             theme: {
                 background: '#0f172a', // slate-900
                 foreground: '#f1f5f9', // slate-100
-                cursor: '#3b82f6', // blue-500
+                cursor: '#3b82f6', // black-500
             },
             fontFamily: 'JetBrains Mono, Fira Code, monospace',
             fontSize: 13,

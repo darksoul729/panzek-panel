@@ -33,7 +33,7 @@ func GetSystemLogs(c *fiber.Ctx) error {
 	if err != nil {
 		mockLogs := []string{
 			"Mar 24 17:02:15 kernel: Initializing TCP legacy scan: [PASSED]",
-			"Mar 24 17:02:15 systemd[1]: Started Home Server Panel Backend.",
+			"Mar 24 17:02:15 systemd[1]: Started Panzek Panel Backend.",
 			"Mar 24 17:02:16 postgres[41]: database system is ready to accept connections",
 			"Mar 24 17:02:17 fiber: Server starting on port 3000",
 			"Mar 24 17:02:18 nginx: [info] 127.0.0.1 worker process 4567 started",

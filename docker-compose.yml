@@ -58,19 +58,7 @@ services:
     networks:
       - panel-network
 
-  frontend:
-    build:
-      context: ./frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=/api
-    networks:
-      - panel-network
-
+  # MySQL service for site databases (if needed by host)
   mysql:
     image: mysql:8.0
     environment:
