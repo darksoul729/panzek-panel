@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Globe, Plus, Play, Square, RotateCw, Trash2, Server, Box, GitBranch, Network } from 'lucide-react';
+import { Globe, Plus, Play, Square, RotateCw, Trash2, Server, Box, GitBranch, Network, ScrollText, X } from 'lucide-react';
 import { sitesApi } from '../services/api';
 
 const BentoCard = ({ children, className = '', span = '' }: any) => (
@@ -12,6 +12,21 @@ const SitesPage = () => {
     const [sites, setSites] = useState<any[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [controllingId, setControllingId] = useState<number | string | null>(null);
+    const [showLogs, setShowLogs] = useState<any>(null);
+    const [logContent, setLogContent] = useState<string[]>([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+
+    const fetchLogs = async (id: number) => {
+        setLoadingLogs(true);
+        try {
+            const res = await sitesApi.logs(id);
+            setLogContent(res.data.logs || []);
+        } catch (err) {
+            setLogContent(["Error loading logs from backend."]);
+        } finally {
+            setLoadingLogs(false);
+        }
+    };
 
     const fetchSites = async () => {
         try {
@@ -160,6 +175,9 @@ const SitesPage = () => {
                                 </button>
                             </div>
 
+                            <button onClick={() => { setShowLogs(site); fetchLogs(site.id || site.ID); }} className="p-2.5 rounded-xl bg-neutral-50 hover:bg-black hover:text-white text-neutral-600 border border-neutral-200 transition-all shadow-sm" title="View Logs">
+                                <ScrollText size={16} />
+                            </button>
                             <button onClick={() => handleDelete(site?.id || site?.ID, site?.domain)} disabled={controllingId === (site?.id || site?.ID)} className="p-2.5 rounded-xl bg-red-50 hover:bg-red-600 hover:text-white text-red-500 border border-red-100 transition-all shadow-sm group-hover:opacity-100 disabled:opacity-50" title="Delete Deployment">
                                 <Trash2 size={16} />
                             </button>
@@ -302,6 +320,37 @@ const SitesPage = () => {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {showLogs && (
+                <div className="fixed inset-0 bg-neutral-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-4xl w-full shadow-2xl relative overflow-hidden max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-300">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-3xl font-black text-black">Site Diagnostics & Logs</h3>
+                            <button onClick={() => setShowLogs(null)} className="w-10 h-10 bg-neutral-50 hover:bg-neutral-200 rounded-full flex items-center justify-center transition-colors">
+                                <X size={20} className="text-neutral-500" />
+                            </button>
+                        </div>
+                        <div className="bg-black rounded-2xl p-6 overflow-y-auto flex-1 font-mono text-xs text-neutral-300 leading-relaxed shadow-inner">
+                            {loadingLogs ? (
+                                <div className="flex items-center gap-2 text-indigo-400">
+                                    <RotateCw size={14} className="animate-spin" />
+                                    Querying real-time container metrics...
+                                </div>
+                            ) : logContent.length > 0 ? (
+                                logContent.map((line, i) => (
+                                    <div key={i} className={line.startsWith("ERROR") ? "text-red-400 font-bold" : line.startsWith("OK") ? "text-green-400" : line.startsWith("---") ? "text-indigo-400 mt-4 font-black" : ""}>
+                                        {line}
+                                    </div>
+                                ))
+                            ) : (
+                                "No runtime data available for this site node."
+                            )}
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                            <button onClick={() => setShowLogs(null)} className="px-8 py-4 rounded-2xl bg-black text-white font-black uppercase tracking-widest text-[11px] shadow-lg">Close</button>
                         </div>
                     </div>
                 </div>

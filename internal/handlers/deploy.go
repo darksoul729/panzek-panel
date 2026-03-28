@@ -143,6 +143,8 @@ func performDeployment(s *data.Site) error {
     environment:
       - WEB_DOCUMENT_ROOT=/app/public
       - WEB_DOCUMENT_INDEX=index.php
+      - APPLICATION_UID=1000
+      - APPLICATION_GID=1000
     volumes:
       - "%s:/app"
     labels:

@@ -39,6 +39,7 @@ export const sitesApi = {
     deploy: (siteId: number) => api.post('/sites/deploy', { site_id: siteId }),
     delete: (id: number) => api.delete(`/sites/${id}`),
     control: (id: number, action: string) => api.post(`/sites/${id}/control?action=${action}`),
+    logs: (id: number) => api.get(`/sites/${id}/logs`),
 };
 
 export default api;
