@@ -37,10 +37,6 @@ func main() {
 	// Terminal WebSocket
 	app.Get("/ws/terminal", handlers.TerminalMiddleware, websocket.New(handlers.TerminalHandler))
 
-	// Static files serving
-	app.Static("/", "./web")
-	app.Static("/assets", "./web/assets")
-
 	// API Routes
 	api := app.Group("/api")
 	
@@ -122,6 +118,15 @@ func main() {
 	settings.Post("/cloudflare/tunnel", handlers.SetupCloudflareTunnel)
 	settings.Post("/cloudflare/tunnel/restart", handlers.RestartCloudflareTunnel)
 	settings.Post("/reset", handlers.ResetDatabase)
+
+	// Static files serving (Moved after API routes)
+	app.Static("/", "./web")
+	app.Static("/assets", "./web/assets")
+
+	// SPA Fallback: Any route that doesn't match API or static files gets index.html
+	app.Get("/*", func(c *fiber.Ctx) error {
+		return c.SendFile("./web/index.html")
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {

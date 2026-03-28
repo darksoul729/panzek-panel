@@ -305,10 +305,16 @@ build_frontend() {
   info "npm install..."
   npm install --prefer-offline --no-audit 2>&1 | tail -5
 
-  info "npm run build (tsc + vite build)..."
-  npm run build 2>&1 | tail -10
+  info "npm run build (tsc + vite build) with relative API..."
+  VITE_API_URL=/api npm run build 2>&1 | tail -10
 
   log "Frontend built di frontend/dist/"
+  
+  # Sync to root web directory for Go server
+  info "Syncing build to web/ directory..."
+  rm -rf "$INSTALL_DIR/web"
+  cp -r "$INSTALL_DIR/frontend/dist" "$INSTALL_DIR/web"
+  log "Assets ready at $INSTALL_DIR/web"
   cd "$INSTALL_DIR"
 }
 

@@ -41,5 +41,6 @@ RUN ln -sf /usr/bin/php83 /usr/bin/php
 
 WORKDIR /root/
 COPY --from=builder /app/main .
+COPY web ./web
 EXPOSE 3000
 CMD ["./main"]
