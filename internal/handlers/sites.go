@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"home-server-panel/internal/data"
 	"github.com/gofiber/fiber/v2"
