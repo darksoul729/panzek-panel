@@ -182,13 +182,39 @@ networks:
 
 	// 2. RUN APP BUILD STEPS
 	if s.Type == "laravel" {
-		// Provision MySQL database and user first
+		// 1. PROVISION DATABASE
 		if err := provisionDatabase(s); err != nil {
 			log.Printf("[Deploy] Database provisioning warning: %v\n", err)
 		}
 
+		// 2. CREATE .ENV (Before composer, so it exists)
+		envFile := filepath.Join(targetDir, ".env")
+		if _, err := os.Stat(envFile); os.IsNotExist(err) {
+			content := ""
+			exampleEnv := filepath.Join(targetDir, ".env.example")
+			if _, err := os.Stat(exampleEnv); err == nil {
+				input, _ := os.ReadFile(exampleEnv)
+				content = string(input)
+			} else {
+				content = "APP_NAME=Laravel\nAPP_ENV=production\nAPP_DEBUG=false\nAPP_URL=https://" + s.Domain + "\n\nDB_CONNECTION=mysql\nDB_HOST=mysql\nDB_PORT=3306\n"
+			}
+			content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
+			content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
+			if s.DbName != "" {
+				content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
+			}
+			if s.DbUser != "" {
+				content = strings.Replace(content, "DB_USERNAME=root", "DB_USERNAME="+s.DbUser, 1)
+			}
+			if s.DbPassword != "" {
+				content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD="+s.DbPassword, 1)
+			}
+			os.WriteFile(envFile, []byte(content), 0644)
+			exec.Command("chmod", "-R", "777", targetDir).Run()
+		}
+
+		// 3. RUN COMPOSER
 		log.Printf("[Deploy] Running composer install...\n")
-		// Log to file for user visibility
 		logFile := filepath.Join(targetDir, "deployment.log")
 		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		defer f.Close()
@@ -201,33 +227,7 @@ networks:
 		if err := compCmd.Run(); err != nil {
 			return fmt.Errorf("composer failed. See deployment.log for details: %v", err)
 		}
-
-		envFile := filepath.Join(targetDir, ".env")
-		if _, err := os.Stat(envFile); os.IsNotExist(err) {
-			exampleEnv := filepath.Join(targetDir, ".env.example")
-			if _, err := os.Stat(exampleEnv); err == nil {
-				input, _ := os.ReadFile(exampleEnv)
-				content := string(input)
-				content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
-				content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
-				if !strings.Contains(content, "ASSET_URL=") {
-					content += fmt.Sprintf("\nASSET_URL=https://%s", s.Domain)
-				}
-				if s.DbName != "" {
-					content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
-				}
-				if s.DbUser != "" {
-					content = strings.Replace(content, "DB_USERNAME=root", "DB_USERNAME="+s.DbUser, 1)
-				}
-				if s.DbPassword != "" {
-					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD="+s.DbPassword, 1)
-				} else {
-					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD=root_secret", 1)
-				}
-				os.WriteFile(envFile, []byte(content), 0644)
-				exec.Command("chmod", "777", envFile).Run()
-			}
-		}
+		
 		log.Printf("[Deploy] Artisan commands and Node steps will be deferred until container is UP.\n")
 	}
 
@@ -237,6 +237,10 @@ networks:
 	if out, err := upCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker compose failed: %v\nOutput: %s", err, string(out))
 	}
+
+	// Wait for container to be ready (max 10s)
+	log.Printf("[Deploy] Waiting for container to stabilize...\n")
+	time.Sleep(5 * time.Second)
 
 	// 3. Post-UP container configuration (Commands inside container)
 	if s.Type == "laravel" {
