@@ -107,63 +107,8 @@ func performDeployment(s *data.Site) error {
 	// Set full permissions for Docker to ensure .env and other files can be created
 	exec.Command("chmod", "-R", "777", targetDir).Run()
 
-	// Generate docker-compose.yml for the site
-	safeName := fmt.Sprintf("site-%d", s.ID)
-
-	if s.Type == "laravel" {
-		// Provision MySQL database and user first
-		if err := provisionDatabase(s); err != nil {
-			log.Printf("[Deploy] Database provisioning warning: %v\n", err)
-		}
-
-		log.Printf("[Deploy] Running composer install...\n")
-		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
-		compCmd.Dir = targetDir
-		if out, err := compCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("composer failed: %v\nOutput: %s", err, string(out))
-		}
-
-		envFile := filepath.Join(targetDir, ".env")
-		if _, err := os.Stat(envFile); os.IsNotExist(err) {
-			exampleEnv := filepath.Join(targetDir, ".env.example")
-			if _, err := os.Stat(exampleEnv); err == nil {
-				input, _ := os.ReadFile(exampleEnv)
-				content := string(input)
-				// Auto-patch DB configuration for the panel environment
-				content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
-				
-				// Enforce HTTPS for APP_URL and ASSET_URL for Cloudflare Tunnel
-				content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
-				if !strings.Contains(content, "ASSET_URL=") {
-					content += fmt.Sprintf("\nASSET_URL=https://%s", s.Domain)
-				} else {
-					// Use a simple replacement if it already exists or just append if logic is complex
-					// For now, appending is safer if we don't know the exact line
-					content += fmt.Sprintf("\nAPP_URL=https://%s", s.Domain)
-				}
-				
-				// Ensure correct DB settings
-				if s.DbName != "" {
-					content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
-				}
-				if s.DbUser != "" {
-					content = strings.Replace(content, "DB_USERNAME=root", "DB_USERNAME="+s.DbUser, 1)
-				}
-				
-				if s.DbPassword != "" {
-					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD="+s.DbPassword, 1)
-				} else {
-					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD=root_secret", 1)
-				}
-				
-				os.WriteFile(envFile, []byte(content), 0644)
-			}
-		}
-
-		log.Printf("[Deploy] Artisan commands and Node steps will be deferred until container is UP.\n")
-	}
-
-	// Determine hostPath
+	// 1. GENERATE DOCKER CONFIG FIRST (Resilience)
+	// Determine paths
 	relPath, _ := filepath.Rel("/var/www", targetDir)
 	hostPath := filepath.Join("/home/panzek/project-menuju-sukses/home-server-panel/sites", relPath)
 
@@ -177,6 +122,7 @@ func performDeployment(s *data.Site) error {
 	}
 	joinedRules := strings.Join(rules, " || ")
 
+	safeName := fmt.Sprintf("site-%d", s.ID)
 	var composeContent string
 	if s.Type == "laravel" {
 		composeContent = fmt.Sprintf(`services:
@@ -221,8 +167,53 @@ networks:
 	if err := os.WriteFile(composeFile, []byte(composeContent), 0644); err != nil {
 		return fmt.Errorf("failed to create docker-compose.yml: %v", err)
 	}
+	// Extra chmod to be sure
+	exec.Command("chmod", "777", composeFile).Run()
 
-	// 1. Spin up container
+	// 2. RUN APP BUILD STEPS
+	if s.Type == "laravel" {
+		// Provision MySQL database and user first
+		if err := provisionDatabase(s); err != nil {
+			log.Printf("[Deploy] Database provisioning warning: %v\n", err)
+		}
+
+		log.Printf("[Deploy] Running composer install...\n")
+		compCmd := exec.Command("composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader")
+		compCmd.Dir = targetDir
+		if out, err := compCmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("composer failed (folder created but install failed): %v\nOutput: %s", err, string(out))
+		}
+
+		envFile := filepath.Join(targetDir, ".env")
+		if _, err := os.Stat(envFile); os.IsNotExist(err) {
+			exampleEnv := filepath.Join(targetDir, ".env.example")
+			if _, err := os.Stat(exampleEnv); err == nil {
+				input, _ := os.ReadFile(exampleEnv)
+				content := string(input)
+				content = strings.Replace(content, "DB_HOST=127.0.0.1", "DB_HOST=mysql", 1)
+				content = strings.Replace(content, "APP_URL=http://localhost", fmt.Sprintf("APP_URL=https://%s", s.Domain), 1)
+				if !strings.Contains(content, "ASSET_URL=") {
+					content += fmt.Sprintf("\nASSET_URL=https://%s", s.Domain)
+				}
+				if s.DbName != "" {
+					content = strings.Replace(content, "DB_DATABASE=laravel", "DB_DATABASE="+s.DbName, 1)
+				}
+				if s.DbUser != "" {
+					content = strings.Replace(content, "DB_USERNAME=root", "DB_USERNAME="+s.DbUser, 1)
+				}
+				if s.DbPassword != "" {
+					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD="+s.DbPassword, 1)
+				} else {
+					content = strings.Replace(content, "DB_PASSWORD=", "DB_PASSWORD=root_secret", 1)
+				}
+				os.WriteFile(envFile, []byte(content), 0644)
+				exec.Command("chmod", "777", envFile).Run()
+			}
+		}
+		log.Printf("[Deploy] Artisan commands and Node steps will be deferred until container is UP.\n")
+	}
+
+	// 3. SPIN UP CONTAINER
 	upCmd := exec.Command("docker", "compose", "-p", safeName, "up", "-d", "--build")
 	upCmd.Dir = targetDir
 	if out, err := upCmd.CombinedOutput(); err != nil {
