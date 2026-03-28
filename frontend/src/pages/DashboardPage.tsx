@@ -63,7 +63,7 @@ const DashboardPage = () => {
                     progress={stats?.cpu?.usage_percent || 0}
                     icon={Cpu}
                     color="blue"
-                    subtext={`${stats?.cpu?.cores || 0} Cores`}
+                    subtext={stats?.cpu?.model_name || `${stats?.cpu?.cores || 0} Cores`}
                 />
                 <StatCard
                     title="Memory"
@@ -201,19 +201,19 @@ const DashboardPage = () => {
                             <div className="space-y-4">
                                 <div className="flex justify-between items-center border-b border-slate-50 pb-3">
                                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">OS</span>
-                                    <span className="text-sm font-bold text-slate-700">Linux x86_64</span>
+                                    <span className="text-sm font-bold text-slate-700">{stats?.info?.os || 'Linux'} {stats?.info?.arch || 'x86_64'}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-slate-50 pb-3">
                                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Kernel</span>
-                                    <span className="text-sm font-mono text-emerald-600 font-bold">6.1.0-std</span>
+                                    <span className="text-sm font-mono text-emerald-600 font-bold">{stats?.info?.kernel || '---'}</span>
                                 </div>
                                 <div className="flex justify-between items-center border-b border-slate-50 pb-3">
                                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Panel Version</span>
-                                    <span className="text-xs font-black bg-blue-50 px-2.5 py-1 rounded-lg text-blue-600 uppercase tracking-tighter">v2.4.0-pro</span>
+                                    <span className="text-xs font-black bg-blue-50 px-2.5 py-1 rounded-lg text-blue-600 uppercase tracking-tighter">v2.1.0-ENT</span>
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Uptime</span>
-                                    <span className="text-sm font-bold text-slate-600">12 Days, 4h</span>
+                                    <span className="text-sm font-bold text-slate-600">{stats?.info?.uptime || '---'}</span>
                                 </div>
                             </div>
                         </div>

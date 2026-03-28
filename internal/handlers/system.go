@@ -64,10 +64,26 @@ func GetCPUUsage(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"usage_percent": usagePercent,
 		"cores":         cores,
+		"model_name":    getCPUModel(),
 		"load_1min":     load1,
 		"load_5min":     load5,
 		"load_15min":    load15,
 	})
+}
+
+func getCPUModel() string {
+	if raw, err := os.ReadFile("/proc/cpuinfo"); err == nil {
+		lines := strings.Split(string(raw), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "model name") {
+				parts := strings.Split(line, ":")
+				if len(parts) >= 2 {
+					return strings.TrimSpace(parts[1])
+				}
+			}
+		}
+	}
+	return "Unknown Processor"
 }
 
 func GetMemoryUsage(c *fiber.Ctx) error {
