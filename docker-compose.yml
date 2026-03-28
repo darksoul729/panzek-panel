@@ -34,6 +34,7 @@ services:
       - PANEL_DB_PORT=5432
       - MYSQL_ROOT_PASSWORD=root_secret
       - MYSQL_HOST=mysql
+      - PANEL_HOST_PATH=${PWD}
     depends_on:
       db:
         condition: service_healthy

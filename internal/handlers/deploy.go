@@ -110,7 +110,13 @@ func performDeployment(s *data.Site) error {
 	// 1. GENERATE DOCKER CONFIG FIRST (Resilience)
 	// Determine paths
 	relPath, _ := filepath.Rel("/var/www", targetDir)
-	hostPath := filepath.Join("/home/panzek/project-menuju-sukses/home-server-panel/sites", relPath)
+	
+	// Use dynamic host path if available, fallback to hardcoded if not (for backward compatibility)
+	baseHostPath := os.Getenv("PANEL_HOST_PATH")
+	if baseHostPath == "" {
+		baseHostPath = "/home/panzek/project-menuju-sukses/home-server-panel"
+	}
+	hostPath := filepath.Join(baseHostPath, "sites", relPath)
 
 	// Fetch custom domains
 	var customDomains []data.CustomDomain
