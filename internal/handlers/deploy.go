@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -280,51 +281,13 @@ networks:
 
 	// 3. Post-UP container configuration (Commands inside container)
 	if s.Type == "laravel" {
-		logFile := filepath.Join(targetDir, "deployment.log")
-		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		defer f.Close()
-
-		fmt.Fprintf(f, "[%s] Fixing permissions inside container %s...\n", time.Now().Format(time.RFC3339), containerName)
-		cmdPerms := exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app")
-		cmdPerms.Stdout = f
-		cmdPerms.Stderr = f
-		cmdPerms.Run()
-
-		fmt.Fprintf(f, "[%s] Generating artisan key...\n", time.Now().Format(time.RFC3339))
-		cmdKey := exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force")
-		cmdKey.Stdout = f
-		cmdKey.Stderr = f
-		cmdKey.Run()
-
-		fmt.Fprintf(f, "[%s] Running migrations...\n", time.Now().Format(time.RFC3339))
-		cmdMigrate := exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "migrate", "--force")
-		cmdMigrate.Stdout = f
-		cmdMigrate.Stderr = f
-		cmdMigrate.Run()
-
-		// Run NPM if build is needed
-		pkgJson := filepath.Join(targetDir, "package.json")
-		if _, err := os.Stat(pkgJson); err == nil {
-			fmt.Fprintf(f, "[%s] Running npm install (this can take high time)...\n", time.Now().Format(time.RFC3339))
-			cmdNpmInstall := exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "install", "--no-audit", "--no-fund")
-			cmdNpmInstall.Stdout = f
-			cmdNpmInstall.Stderr = f
-			cmdNpmInstall.Run()
-			
-			fmt.Fprintf(f, "[%s] Running npm run build...\n", time.Now().Format(time.RFC3339))
-			cmdNpmBuild := exec.Command("docker", "exec", "-w", "/app", containerName, "npm", "run", "build")
-			cmdNpmBuild.Stdout = f
-			cmdNpmBuild.Stderr = f
-			cmdNpmBuild.Run()
+		if err := runLaravelPostDeploy(containerName, targetDir); err != nil {
+			return err
 		}
+	}
 
-		fmt.Fprintf(f, "[%s] Fixing symlinks and storage...\n", time.Now().Format(time.RFC3339))
-		exec.Command("docker", "exec", "-w", "/app", containerName, "rm", "-rf", "public/storage").Run()
-		exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "storage:link").Run()
-		
-		// Set correct 775 permissions
-		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "775", "/app/storage", "/app/bootstrap/cache").Run()
-		fmt.Fprintf(f, "[%s] Deployment complete!\n", time.Now().Format(time.RFC3339))
+	if err := applyHostDeployPermissions(targetDir); err != nil {
+		log.Printf("[Deploy] Warning while applying host permissions for %s: %v\n", s.Domain, err)
 	}
 
 	// 3. Post-Deployment Optimization: Cloudflare Tunnel & DNS
@@ -346,6 +309,126 @@ networks:
 	}()
 
 	return nil
+}
+
+func runLaravelPostDeploy(containerName, targetDir string) error {
+	logFile := filepath.Join(targetDir, "deployment.log")
+	f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer f.Close()
+
+	if err := waitForContainerFile(containerName, "/app/public/index.php", 20*time.Second); err != nil {
+		fmt.Fprintf(f, "[%s] ERROR: %v\n", time.Now().Format(time.RFC3339), err)
+		return err
+	}
+
+	fmt.Fprintf(f, "[%s] Fixing permissions inside container %s...\n", time.Now().Format(time.RFC3339), containerName)
+	if err := runCommandToLog(f, exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app")); err != nil {
+		fmt.Fprintf(f, "[%s] WARN: Failed to fix ownership: %v\n", time.Now().Format(time.RFC3339), err)
+	}
+
+	if !hostFileExists(filepath.Join(targetDir, "vendor", "autoload.php")) {
+		fmt.Fprintf(f, "[%s] Installing PHP dependencies with Composer...\n", time.Now().Format(time.RFC3339))
+		if err := runCommandToLog(f, exec.Command("docker", "exec", "-w", "/app", containerName, "composer", "install", "--no-interaction", "--prefer-dist", "--optimize-autoloader", "--ignore-platform-reqs")); err != nil {
+			return fmt.Errorf("composer install failed: %v", err)
+		}
+	}
+
+	if !containerFileExists(containerName, "/app/artisan") {
+		return fmt.Errorf("laravel deploy failed: /app/artisan not found inside %s after mount and composer install", containerName)
+	}
+
+	fmt.Fprintf(f, "[%s] Generating artisan key...\n", time.Now().Format(time.RFC3339))
+	if err := runCommandToLog(f, exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force")); err != nil {
+		return fmt.Errorf("artisan key:generate failed: %v", err)
+	}
+
+	fmt.Fprintf(f, "[%s] Running migrations...\n", time.Now().Format(time.RFC3339))
+	if err := runCommandToLog(f, exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "migrate", "--force")); err != nil {
+		return fmt.Errorf("artisan migrate failed: %v", err)
+	}
+
+	if hostFileExists(filepath.Join(targetDir, "package.json")) {
+		fmt.Fprintf(f, "[%s] Frontend package.json detected. Skipping npm build in PHP runtime image.\n", time.Now().Format(time.RFC3339))
+	}
+
+	fmt.Fprintf(f, "[%s] Fixing symlinks and storage...\n", time.Now().Format(time.RFC3339))
+	exec.Command("docker", "exec", "-w", "/app", containerName, "rm", "-rf", "public/storage").Run()
+	if err := runCommandToLog(f, exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "storage:link")); err != nil {
+		fmt.Fprintf(f, "[%s] WARN: storage:link failed: %v\n", time.Now().Format(time.RFC3339), err)
+	}
+
+	exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "775", "/app/storage", "/app/bootstrap/cache").Run()
+	fmt.Fprintf(f, "[%s] Deployment complete!\n", time.Now().Format(time.RFC3339))
+	return nil
+}
+
+func waitForContainerFile(containerName, containerPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if containerFileExists(containerName, containerPath) {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for %s to become available inside %s", containerPath, containerName)
+}
+
+func containerFileExists(containerName, containerPath string) bool {
+	cmd := exec.Command("docker", "exec", containerName, "sh", "-lc", fmt.Sprintf("test -f %q", containerPath))
+	return cmd.Run() == nil
+}
+
+func hostFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func runCommandToLog(logFile *os.File, cmd *exec.Cmd) error {
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	return cmd.Run()
+}
+
+func applyHostDeployPermissions(targetDir string) error {
+	ownerUID := envInt("PANEL_FILE_UID", 1000)
+	ownerGID := envInt("PANEL_FILE_GID", 33)
+
+	commands := []*exec.Cmd{
+		exec.Command("chown", "-R", fmt.Sprintf("%d:%d", ownerUID, ownerGID), targetDir),
+		exec.Command("find", targetDir, "-type", "d", "-exec", "chmod", "775", "{}", ";"),
+		exec.Command("find", targetDir, "-type", "f", "-exec", "chmod", "664", "{}", ";"),
+	}
+
+	for _, cmd := range commands {
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("%s failed: %v (%s)", strings.Join(cmd.Args, " "), err, strings.TrimSpace(string(out)))
+		}
+	}
+
+	for _, writableDir := range []string{
+		filepath.Join(targetDir, "storage"),
+		filepath.Join(targetDir, "bootstrap", "cache"),
+	} {
+		if hostFileExists(writableDir) {
+			if out, err := exec.Command("chmod", "-R", "775", writableDir).CombinedOutput(); err != nil {
+				return fmt.Errorf("chmod writable dirs failed: %v (%s)", err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
+
+	return nil
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func cleanupConflictingSiteContainers(currentProject string, domains []string) error {

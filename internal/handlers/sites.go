@@ -47,7 +47,11 @@ func ListSites(c *fiber.Ctx) error {
 				ip = parts[1]
 
 				if isRunning {
-					currentStatus = "online"
+					if siteRuntimeHealthy(s) {
+						currentStatus = "online"
+					} else {
+						currentStatus = "degraded"
+					}
 				} else {
 					currentStatus = "stopped"
 				}
@@ -134,8 +138,21 @@ func GetSiteLogs(c *fiber.Ctx) error {
 
 	var output []byte
 	var err error
+	containerStartedAt := ""
 	for _, containerName := range patterns {
-		cmd := exec.Command("docker", "logs", "--tail", "100", containerName)
+		if containerStartedAt == "" {
+			startCmd := exec.Command("docker", "inspect", "-f", "{{.State.StartedAt}}", containerName)
+			if startedOut, startedErr := startCmd.Output(); startedErr == nil {
+				containerStartedAt = strings.TrimSpace(string(startedOut))
+			}
+		}
+
+		logArgs := []string{"logs", "--tail", "100"}
+		if containerStartedAt != "" {
+			logArgs = append(logArgs, "--since", containerStartedAt)
+		}
+		logArgs = append(logArgs, containerName)
+		cmd := exec.Command("docker", logArgs...)
 		output, err = cmd.CombinedOutput()
 		if err == nil {
 			break
@@ -204,9 +221,9 @@ func GetSiteLogs(c *fiber.Ctx) error {
 	
 	deployLogPath := filepath.Join(site.Path, "deployment.log")
 	if deployLogData, err := os.ReadFile(deployLogPath); err == nil {
-		fullLogs = append(fullLogs, "--- DEPLOYMENT LOGS ---")
-		fullLogs = append(fullLogs, strings.Split(string(deployLogData), "\n")...)
-		fullLogs = append(fullLogs, "--- CONTAINER LOGS ---")
+		fullLogs = append(fullLogs, "--- CURRENT DEPLOYMENT LOGS ---")
+		fullLogs = append(fullLogs, tailLines(strings.Split(string(deployLogData), "\n"), 200)...)
+		fullLogs = append(fullLogs, "--- CURRENT CONTAINER LOGS ---")
 	}
 
 	fullLogs = append(fullLogs, strings.Split(string(output), "\n")...)
@@ -221,6 +238,26 @@ func GetSiteLogs(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"logs": fullLogs})
+}
+
+func siteRuntimeHealthy(site data.Site) bool {
+	containerName := fmt.Sprintf("site-%d-web-1", site.ID)
+
+	var cmd *exec.Cmd
+	if site.Type == "laravel" {
+		cmd = exec.Command("docker", "exec", containerName, "sh", "-lc", "test -f /app/public/index.php && test -f /app/artisan")
+	} else {
+		cmd = exec.Command("docker", "exec", containerName, "sh", "-lc", "test -f /site/index.html || test -f /site/dist/index.html || test -f /site/build/index.html || test -f /site/public/index.html")
+	}
+
+	return cmd.Run() == nil
+}
+
+func tailLines(lines []string, limit int) []string {
+	if len(lines) <= limit {
+		return lines
+	}
+	return lines[len(lines)-limit:]
 }
 
 func ControlSite(c *fiber.Ctx) error {
@@ -298,7 +335,6 @@ func ControlSite(c *fiber.Ctx) error {
 		
 		// Fix ownership and permissions inside container as root
 		exec.Command("docker", "exec", "-u", "root", containerName, "chown", "-R", "1000:1000", "/app").Run()
-		exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/storage", "/app/bootstrap/cache").Run()
 		
 		// Check for vendor folder and run composer if missing
 		if site.Type == "laravel" {
@@ -321,8 +357,14 @@ func ControlSite(c *fiber.Ctx) error {
 				exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/vendor", "/app/storage").Run()
 			}
 			
-			// Ensure APP_KEY is generated if still empty
-			exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force").Run()
+			if containerFileExists(containerName, "/app/storage") && containerFileExists(containerName, "/app/bootstrap/cache") {
+				exec.Command("docker", "exec", "-u", "root", containerName, "chmod", "-R", "777", "/app/storage", "/app/bootstrap/cache").Run()
+			}
+
+			// Ensure APP_KEY is generated if the Laravel entrypoint exists
+			if containerFileExists(containerName, "/app/artisan") {
+				exec.Command("docker", "exec", "-w", "/app", containerName, "php", "artisan", "key:generate", "--force").Run()
+			}
 		}
 	}
 
