@@ -133,29 +133,49 @@ func GetSiteLogs(c *fiber.Ctx) error {
 		fullLogs = append(fullLogs, fmt.Sprintf("ERROR: Site directory not found at %s", site.Path))
 	} else {
 		fullLogs = append(fullLogs, fmt.Sprintf("OK: Directory exists: %s", site.Path))
-		// Check for public folder
-		publicPath := filepath.Join(site.Path, "public")
-		if _, err := os.Stat(publicPath); os.IsNotExist(err) {
-			fullLogs = append(fullLogs, "ERROR: 'public' folder missing! Laravel needs a public folder to serve.")
-		} else {
-			fullLogs = append(fullLogs, "OK: 'public' folder found.")
-			// Check for index.php
-			indexPath := filepath.Join(publicPath, "index.php")
-			if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-				fullLogs = append(fullLogs, "ERROR: 'public/index.php' missing! Apache has nothing to serve (Causes 403).")
-			} else {
-				fullLogs = append(fullLogs, "OK: 'index.php' found.")
+		if site.Type != "laravel" {
+			candidates := []string{
+				filepath.Join(site.Path, "index.html"),
+				filepath.Join(site.Path, "dist", "index.html"),
+				filepath.Join(site.Path, "build", "index.html"),
+				filepath.Join(site.Path, "public", "index.html"),
 			}
-			
-			// Check .htaccess
-			htaccessPath := filepath.Join(publicPath, ".htaccess")
-			if _, err := os.Stat(htaccessPath); err == nil {
-				fullLogs = append(fullLogs, "OK: '.htaccess' found. Inspecting content...")
-				content, _ := os.ReadFile(htaccessPath)
-				fullLogs = append(fullLogs, "--- HTACCESS CONTENT ---")
-				fullLogs = append(fullLogs, strings.Split(string(content), "\n")...)
+			foundIndex := false
+			for _, candidate := range candidates {
+				if _, err := os.Stat(candidate); err == nil {
+					fullLogs = append(fullLogs, fmt.Sprintf("OK: Static entry found at %s", candidate))
+					foundIndex = true
+					break
+				}
+			}
+			if !foundIndex {
+				fullLogs = append(fullLogs, "ERROR: No index.html found in root, dist/, build/, or public/. This commonly causes nginx 403 on static deployments.")
+			}
+		} else {
+			// Check for public folder
+			publicPath := filepath.Join(site.Path, "public")
+			if _, err := os.Stat(publicPath); os.IsNotExist(err) {
+				fullLogs = append(fullLogs, "ERROR: 'public' folder missing! Laravel needs a public folder to serve.")
 			} else {
-				fullLogs = append(fullLogs, "WARN: '.htaccess' not found.")
+				fullLogs = append(fullLogs, "OK: 'public' folder found.")
+				// Check for index.php
+				indexPath := filepath.Join(publicPath, "index.php")
+				if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+					fullLogs = append(fullLogs, "ERROR: 'public/index.php' missing! Apache has nothing to serve (Causes 403).")
+				} else {
+					fullLogs = append(fullLogs, "OK: 'index.php' found.")
+				}
+				
+				// Check .htaccess
+				htaccessPath := filepath.Join(publicPath, ".htaccess")
+				if _, err := os.Stat(htaccessPath); err == nil {
+					fullLogs = append(fullLogs, "OK: '.htaccess' found. Inspecting content...")
+					content, _ := os.ReadFile(htaccessPath)
+					fullLogs = append(fullLogs, "--- HTACCESS CONTENT ---")
+					fullLogs = append(fullLogs, strings.Split(string(content), "\n")...)
+				} else {
+					fullLogs = append(fullLogs, "WARN: '.htaccess' not found.")
+				}
 			}
 		}
 	}

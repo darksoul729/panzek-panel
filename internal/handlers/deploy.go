@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -133,8 +134,15 @@ func performDeployment(s *data.Site) error {
 		rules = append(rules, fmt.Sprintf("Host(`%s`)", cd.Domain))
 	}
 	joinedRules := strings.Join(rules, " || ")
+	allDomains := []string{s.Domain}
+	for _, cd := range customDomains {
+		allDomains = append(allDomains, cd.Domain)
+	}
 
 	safeName := fmt.Sprintf("site-%d", s.ID)
+	if err := cleanupConflictingSiteContainers(safeName, allDomains); err != nil {
+		log.Printf("[Deploy] Warning while cleaning conflicting containers for %s: %v\n", s.Domain, err)
+	}
 	var composeContent string
 	if s.Type == "laravel" {
 		composeContent = fmt.Sprintf(`services:
@@ -163,7 +171,27 @@ networks:
   web:
     image: nginx:alpine
     volumes:
-      - "%s:/usr/share/nginx/html"
+      - "%s:/site:ro"
+    command: >
+      /bin/sh -c '
+      ROOT=/site;
+      if [ -f /site/dist/index.html ]; then ROOT=/site/dist; fi;
+      if [ -f /site/build/index.html ]; then ROOT=/site/build; fi;
+      if [ -f /site/public/index.html ]; then ROOT=/site/public; fi;
+      cat >/etc/nginx/conf.d/default.conf <<EOF
+      server {
+        listen 80;
+        server_name _;
+        root $${ROOT};
+        index index.html index.htm;
+
+        location / {
+          try_files $$uri $$uri/ /index.html;
+        }
+      }
+      EOF
+      exec nginx -g "daemon off;"
+      '
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.%s.rule=%s"
@@ -255,10 +283,13 @@ networks:
 	log.Printf("[Deploy] Waiting for container to stabilize...\n")
 	time.Sleep(5 * time.Second)
 
+	containerName := fmt.Sprintf("%s-web-1", safeName)
+	if err := validateDeploymentContainer(containerName, hostPath, allDomains); err != nil {
+		return err
+	}
+
 	// 3. Post-UP container configuration (Commands inside container)
 	if s.Type == "laravel" {
-		containerName := fmt.Sprintf("%s-web-1", safeName)
-		
 		logFile := filepath.Join(targetDir, "deployment.log")
 		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		defer f.Close()
@@ -323,6 +354,109 @@ networks:
 			}
 		}
 	}()
+
+	return nil
+}
+
+func cleanupConflictingSiteContainers(currentProject string, domains []string) error {
+	cmd := exec.Command("docker", "ps", "-aq")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	containerIDs := strings.Fields(string(out))
+	if len(containerIDs) == 0 {
+		return nil
+	}
+
+	args := append([]string{"inspect", "--format", "{{.Name}}|{{json .Config.Labels}}|{{index .Config.Labels \"com.docker.compose.project\"}}"}, containerIDs...)
+	inspectCmd := exec.Command("docker", args...)
+	inspectOut, err := inspectCmd.Output()
+	if err != nil {
+		return err
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(inspectOut)), "\n") {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+
+		name := strings.TrimPrefix(parts[0], "/")
+		labelsJSON := parts[1]
+		projectName := parts[2]
+
+		if !strings.HasPrefix(name, "site-") || projectName == currentProject {
+			continue
+		}
+
+		matched := false
+		for _, domain := range domains {
+			if strings.Contains(labelsJSON, domain) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			continue
+		}
+
+		log.Printf("[Deploy] Removing conflicting container %s (project %s)\n", name, projectName)
+		exec.Command("docker", "rm", "-f", name).Run()
+	}
+
+	return nil
+}
+
+func validateDeploymentContainer(containerName, expectedHostPath string, expectedDomains []string) error {
+	cmd := exec.Command("docker", "inspect", containerName)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to inspect deployed container %s: %v", containerName, err)
+	}
+
+	var inspectData []struct {
+		Mounts []struct {
+			Source      string `json:"Source"`
+			Destination string `json:"Destination"`
+		} `json:"Mounts"`
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+
+	if err := json.Unmarshal(out, &inspectData); err != nil || len(inspectData) == 0 {
+		return fmt.Errorf("failed to parse inspect data for %s", containerName)
+	}
+
+	mountOK := false
+	for _, mount := range inspectData[0].Mounts {
+		if mount.Source == expectedHostPath {
+			mountOK = true
+			break
+		}
+	}
+	if !mountOK {
+		return fmt.Errorf("deployment verification failed: %s is not mounted from expected host path %s", containerName, expectedHostPath)
+	}
+
+	labels := inspectData[0].Config.Labels
+	labelValues := make([]string, 0, len(labels))
+	for _, value := range labels {
+		labelValues = append(labelValues, value)
+	}
+	joinedLabels := strings.Join(labelValues, " ")
+	for _, domain := range expectedDomains {
+		if !strings.Contains(joinedLabels, domain) {
+			return fmt.Errorf("deployment verification failed: %s labels do not contain expected domain %s", containerName, domain)
+		}
+	}
 
 	return nil
 }
