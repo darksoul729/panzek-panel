@@ -5,6 +5,7 @@ import (
 	"log"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"home-server-panel/internal/data"
 	"github.com/gofiber/fiber/v2"
 )
@@ -24,6 +25,8 @@ func CloneRepo(c *fiber.Ctx) error {
 	if req.RepoURL == "" || req.Path == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "Repo URL and Path are required"})
 	}
+
+	req.Path = normalizeSitePath(strings.TrimSpace(req.Path), "")
 
 	branch := req.Branch
 	if branch == "" {

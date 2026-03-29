@@ -16,19 +16,22 @@ type FileInfo struct {
 	Path  string `json:"path"`
 }
 
-const siteBaseDir = "/var/www"
+func siteBaseDir() string {
+	return panelSitesBasePath()
+}
 
 func safeResolve(path string) string {
+	baseDir := siteBaseDir()
 	clean := filepath.Clean(path)
 	if clean == ".." || strings.HasPrefix(clean, "../") || filepath.IsAbs(clean) {
 		// If it's absolute, we check if it starts with siteBaseDir
-		if strings.HasPrefix(clean, siteBaseDir) {
+		if strings.HasPrefix(clean, baseDir) {
 			return clean
 		}
 		// Fallback to base
-		return siteBaseDir
+		return baseDir
 	}
-	return filepath.Join(siteBaseDir, clean)
+	return filepath.Join(baseDir, clean)
 }
 
 func ListFiles(c *fiber.Ctx) error {
@@ -45,7 +48,7 @@ func ListFiles(c *fiber.Ctx) error {
 		info, _ := entry.Info()
 		
 		// Return relative path to the baseDir for the frontend
-		relPath, _ := filepath.Rel(siteBaseDir, filepath.Join(fullPath, entry.Name()))
+		relPath, _ := filepath.Rel(siteBaseDir(), filepath.Join(fullPath, entry.Name()))
 		
 		files = append(files, FileInfo{
 			Name:  entry.Name(),
@@ -130,7 +133,7 @@ func DeleteFile(c *fiber.Ctx) error {
 	fullPath := safeResolve(reqPath)
 	
 	// Safety: prevent deleting the base directory itself
-	if fullPath == siteBaseDir {
+	if fullPath == siteBaseDir() {
 		return c.Status(403).JSON(fiber.Map{"error": "Cannot delete root directory"})
 	}
 
@@ -153,7 +156,7 @@ func RenameFile(c *fiber.Ctx) error {
 	oldFullPath := safeResolve(req.OldPath)
 	newFullPath := filepath.Join(filepath.Dir(oldFullPath), req.NewName)
 
-	if oldFullPath == siteBaseDir {
+	if oldFullPath == siteBaseDir() {
 		return c.Status(403).JSON(fiber.Map{"error": "Cannot rename root directory"})
 	}
 

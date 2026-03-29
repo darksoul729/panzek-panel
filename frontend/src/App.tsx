@@ -12,6 +12,7 @@ import DatabasesPage from './pages/DatabasesPage';
 import { Server, Lock, Menu, X } from 'lucide-react';
 
 function App() {
+  const sitesRootPath = '/opt/home-server-panel/sites';
   const [currentPage, setCurrentPage] = useState(window.location.hash.replace('#', '') || 'dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -43,7 +44,7 @@ function App() {
       case 'settings': return <SettingsPage />;
       case 'sites': return <SitesPage />;
       case 'databases': return <DatabasesPage />;
-      case 'terminal': return <TerminalPage path="/var/www" />;
+      case 'terminal': return <TerminalPage path={sitesRootPath} />;
       default: return (
         <div className="bg-white rounded-[2rem] border border-neutral-200 p-20 text-center shadow-sm">
           <div className="w-20 h-20 bg-neutral-100 text-neutral-500 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 shadow-inner">

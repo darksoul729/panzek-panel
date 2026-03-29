@@ -3,6 +3,8 @@ import { Folder, FileText, ChevronLeft, Search, HardDrive, Trash2, FolderPlus, E
 import api from '../services/api';
 import Terminal from '../components/Terminal';
 
+const SITES_ROOT = '/opt/home-server-panel/sites';
+
 const FilesPage = () => {
     const [items, setItems] = useState<any[]>([]);
     const [path, setPath] = useState('.');
@@ -67,7 +69,7 @@ const FilesPage = () => {
 
     const openInTerminal = (item: any) => {
         const targetPath = item.is_dir ? item.path : path;
-        setTerminalModalPath('/var/www/' + targetPath);
+        setTerminalModalPath(targetPath === '.' ? SITES_ROOT : `${SITES_ROOT}/${targetPath}`);
         setShowTerminal(true);
         setContextMenu(null);
     };
@@ -136,7 +138,7 @@ const FilesPage = () => {
             await api.post('/git/clone', {
                 repo_url: cloneForm.url,
                 branch: cloneForm.branch,
-                path: path === '.' ? '/var/www/' + cloneForm.url.split('/').pop()?.replace('.git', '') : path + '/' + cloneForm.url.split('/').pop()?.replace('.git', '')
+                path: path === '.' ? `${SITES_ROOT}/${cloneForm.url.split('/').pop()?.replace('.git', '')}` : `${SITES_ROOT}/${path}/${cloneForm.url.split('/').pop()?.replace('.git', '')}`
             });
             setShowClone(false);
             setCloneForm({ url: '', branch: '' });
@@ -250,7 +252,7 @@ const FilesPage = () => {
                             <span className="px-3 py-1 bg-neutral-200 text-black rounded-full text-[10px] font-black uppercase tracking-widest">Mounted</span>
                         </div>
                         <p className="text-neutral-500 text-sm font-medium leading-tight">
-                            Accessing localized system volume at <code className="bg-white/50 px-1.5 rounded text-black font-bold">/var/www</code>.
+                            Accessing localized system volume at <code className="bg-white/50 px-1.5 rounded text-black font-bold">{SITES_ROOT}</code>.
                         </p>
                     </div>
                 </div>
@@ -528,7 +530,7 @@ const FilesPage = () => {
                                 <div className="space-y-1">
                                     <p className="text-[10px] text-black font-black uppercase tracking-widest leading-none">Security Policy</p>
                                     <p className="text-[10px] text-black/80 font-bold leading-relaxed uppercase tracking-tight">
-                                        Repository will be recruited into <code className="bg-white/60 px-1 rounded">/var/www</code>. Ensure public accessibility or provide keys.
+                                        Repository will be recruited into <code className="bg-white/60 px-1 rounded">{SITES_ROOT}</code>. Ensure public accessibility or provide keys.
                                     </p>
                                 </div>
                             </div>
