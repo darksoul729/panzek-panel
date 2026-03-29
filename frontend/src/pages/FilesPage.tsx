@@ -3,7 +3,7 @@ import { Folder, FileText, ChevronLeft, Search, HardDrive, Trash2, FolderPlus, E
 import api from '../services/api';
 import Terminal from '../components/Terminal';
 
-const SITES_ROOT = '/opt/home-server-panel/sites';
+const SITES_ROOT = '/var/www';
 
 const FilesPage = () => {
     const [items, setItems] = useState<any[]>([]);

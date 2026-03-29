@@ -1,23 +1,14 @@
 package handlers
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"home-server-panel/internal/data"
 )
 
-func panelHostBasePath() string {
-	baseHostPath := os.Getenv("PANEL_HOST_PATH")
-	if baseHostPath == "" {
-		baseHostPath = "/home/panzek/project-menuju-sukses/home-server-panel"
-	}
-	return baseHostPath
-}
-
 func panelSitesBasePath() string {
-	return filepath.Join(panelHostBasePath(), "sites")
+	return "/var/www"
 }
 
 func normalizeSitePath(rawPath, domain string) string {
@@ -30,12 +21,19 @@ func normalizeSitePath(rawPath, domain string) string {
 		return panelSitesBasePath()
 	}
 
-	if strings.HasPrefix(trimmedPath, panelSitesBasePath()+string(os.PathSeparator)) || trimmedPath == panelSitesBasePath() {
+	if strings.HasPrefix(trimmedPath, panelSitesBasePath()+string(filepath.Separator)) || trimmedPath == panelSitesBasePath() {
 		return trimmedPath
 	}
 
 	if strings.HasPrefix(trimmedPath, "/var/www/") {
 		relPath, err := filepath.Rel("/var/www", trimmedPath)
+		if err == nil && relPath != "." {
+			return filepath.Join(panelSitesBasePath(), relPath)
+		}
+	}
+
+	if strings.HasPrefix(trimmedPath, "/opt/home-server-panel/sites/") {
+		relPath, err := filepath.Rel("/opt/home-server-panel/sites", trimmedPath)
 		if err == nil && relPath != "." {
 			return filepath.Join(panelSitesBasePath(), relPath)
 		}

@@ -12,7 +12,7 @@ import DatabasesPage from './pages/DatabasesPage';
 import { Server, Lock, Menu, X } from 'lucide-react';
 
 function App() {
-  const sitesRootPath = '/opt/home-server-panel/sites';
+  const sitesRootPath = '/var/www';
   const [currentPage, setCurrentPage] = useState(window.location.hash.replace('#', '') || 'dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
