@@ -13,7 +13,7 @@ import (
 
 func ListSites(c *fiber.Ctx) error {
 	var sites []data.Site
-	data.DB.Find(&sites)
+	data.DB.Order("id DESC").Find(&sites)
 
 	type SiteWithIP struct {
 		data.Site
@@ -21,7 +21,14 @@ func ListSites(c *fiber.Ctx) error {
 	}
 
 	var results []SiteWithIP
+	seenDomains := map[string]bool{}
 	for _, s := range sites {
+		normalizedDomain := strings.ToLower(strings.TrimSpace(s.Domain))
+		if normalizedDomain != "" && seenDomains[normalizedDomain] {
+			continue
+		}
+		seenDomains[normalizedDomain] = true
+
 		ip := ""
 		currentStatus := s.Status // Default to DB status
 
@@ -61,10 +68,25 @@ func CreateSite(c *fiber.Ctx) error {
 	if err := c.BodyParser(&site); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
+
+	site.Domain = strings.ToLower(strings.TrimSpace(site.Domain))
+	site.Branch = strings.TrimSpace(site.Branch)
+	site.GitURL = strings.TrimSpace(site.GitURL)
+	if site.Domain == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Domain is required"})
+	}
 	
 	if site.Path == "" {
 		site.Path = site.Domain
 	}
+
+	var existing data.Site
+	if err := data.DB.Where("LOWER(domain) = ?", site.Domain).First(&existing).Error; err == nil {
+		return c.Status(409).JSON(fiber.Map{
+			"error": fmt.Sprintf("Domain %s is already configured on site ID %d", site.Domain, existing.ID),
+		})
+	}
+
 	site.Status = "online"
 	if err := data.DB.Create(&site).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -242,6 +264,16 @@ func ControlSite(c *fiber.Ctx) error {
 	dockerAction := action
 	var args []string
 	if action == "start" || action == "restart" {
+		var customDomains []data.CustomDomain
+		data.DB.Where("site_id = ?", site.ID).Find(&customDomains)
+		allDomains := []string{site.Domain}
+		for _, cd := range customDomains {
+			allDomains = append(allDomains, cd.Domain)
+		}
+		if err := cleanupConflictingSiteContainers(projectName, allDomains); err != nil {
+			log.Printf("[ControlSite] Warning while cleaning conflicting containers for %s: %v\n", site.Domain, err)
+		}
+
 		dockerAction = "up"
 		args = []string{"-d"}
 		
