@@ -39,10 +39,11 @@ func DeploySite(c *fiber.Ctx) error {
 
 	// Update status to deploying
 	site.Status = "deploying"
+	site.Path = syncSitePath(&site)
 	data.DB.Save(&site)
 
 	// Create/Clear deployment log
-	logFile := filepath.Join("/var/www", site.Path, "deployment.log")
+	logFile := filepath.Join(site.Path, "deployment.log")
 	os.Remove(logFile) // Start fresh
 	
 	// Run deployment in background
@@ -69,11 +70,7 @@ func DeploySite(c *fiber.Ctx) error {
 }
 
 func performDeployment(s *data.Site) error {
-	// Ensure base path is in /var/www (mapped to host)
-	if !filepath.IsAbs(s.Path) {
-		s.Path = filepath.Join("/var/www", s.Path)
-	}
-	targetDir := s.Path
+	targetDir := syncSitePath(s)
 
 	if _, err := os.Stat(targetDir); os.IsNotExist(err) {
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -116,14 +113,7 @@ func performDeployment(s *data.Site) error {
 
 	// 1. GENERATE DOCKER CONFIG FIRST (Resilience)
 	// Determine paths
-	relPath, _ := filepath.Rel("/var/www", targetDir)
-	
-	// Use dynamic host path if available, fallback to hardcoded if not (for backward compatibility)
-	baseHostPath := os.Getenv("PANEL_HOST_PATH")
-	if baseHostPath == "" {
-		baseHostPath = "/home/panzek/project-menuju-sukses/home-server-panel"
-	}
-	hostPath := filepath.Join(baseHostPath, "sites", relPath)
+	hostPath := targetDir
 
 	// Fetch custom domains
 	var customDomains []data.CustomDomain

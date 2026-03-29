@@ -8,6 +8,57 @@ const BentoCard = ({ children, className = '', span = '' }: any) => (
     </div>
 );
 
+const deriveDeployStage = (status: string, logs: string[]) => {
+    const loweredStatus = status.toLowerCase();
+    const joinedLogs = logs.join('\n').toLowerCase();
+
+    if (loweredStatus === 'active' || loweredStatus === 'online') {
+        return 'Deployment finished.';
+    }
+
+    if (loweredStatus === 'error' || logs.some((line) => line.startsWith('ERROR'))) {
+        return 'Deployment failed. Check logs below.';
+    }
+
+    if (joinedLogs.includes('cloning branch') || joinedLogs.includes('git error')) {
+        return 'Cloning repository...';
+    }
+
+    if (joinedLogs.includes('vendor missing') || joinedLogs.includes('composer install')) {
+        return 'Installing PHP dependencies...';
+    }
+
+    if (joinedLogs.includes('running npm install')) {
+        return 'Installing frontend dependencies...';
+    }
+
+    if (joinedLogs.includes('running npm run build')) {
+        return 'Building frontend assets...';
+    }
+
+    if (joinedLogs.includes('docker compose') || joinedLogs.includes('stabilize') || joinedLogs.includes('started')) {
+        return 'Starting container...';
+    }
+
+    if (joinedLogs.includes('generating artisan key')) {
+        return 'Generating application key...';
+    }
+
+    if (joinedLogs.includes('running migrations')) {
+        return 'Running database migrations...';
+    }
+
+    if (joinedLogs.includes('fixing symlinks') || joinedLogs.includes('storage:link')) {
+        return 'Preparing storage links...';
+    }
+
+    if (loweredStatus === 'deploying') {
+        return 'Preparing deployment...';
+    }
+
+    return 'Cloning repository and preparing container...';
+};
+
 const SitesPage = () => {
     const [sites, setSites] = useState<any[]>([]);
     const [showAdd, setShowAdd] = useState(false);
@@ -15,6 +66,10 @@ const SitesPage = () => {
     const [showLogs, setShowLogs] = useState<any>(null);
     const [logContent, setLogContent] = useState<string[]>([]);
     const [loadingLogs, setLoadingLogs] = useState(false);
+    const [creatingSite, setCreatingSite] = useState(false);
+    const [deployingSite, setDeployingSite] = useState<any>(null);
+    const [deployProgress, setDeployProgress] = useState<string[]>([]);
+    const [deployStatus, setDeployStatus] = useState('Preparing deployment...');
 
     const fetchLogs = async (id: number) => {
         setLoadingLogs(true);
@@ -41,6 +96,61 @@ const SitesPage = () => {
         fetchSites();
     }, []);
 
+    useEffect(() => {
+        if (!deployingSite?.id) return;
+
+        let cancelled = false;
+        const siteId = deployingSite.id;
+
+        const pollProgress = async () => {
+            try {
+                const [sitesRes, logsRes] = await Promise.all([
+                    sitesApi.list(),
+                    sitesApi.logs(siteId),
+                ]);
+
+                if (cancelled) return;
+
+                const siteList = Array.isArray(sitesRes?.data) ? sitesRes.data : [];
+                const currentSite = siteList.find((entry: any) => (entry?.id || entry?.ID) === siteId);
+                const nextLogs = logsRes?.data?.logs || [];
+
+                setDeployProgress(nextLogs);
+
+                const loweredStatus = String(currentSite?.status || '').toLowerCase();
+                const nextStage = deriveDeployStage(loweredStatus, nextLogs);
+                if (loweredStatus === 'active' || loweredStatus === 'online') {
+                    setDeployStatus(nextStage);
+                    setShowAdd(false);
+                    setCreatingSite(false);
+                    setDeployingSite(null);
+                    fetchSites();
+                    return;
+                }
+
+                if (loweredStatus === 'error' || nextLogs.some((line: string) => line.startsWith('ERROR'))) {
+                    setDeployStatus(nextStage);
+                    setCreatingSite(false);
+                    return;
+                }
+
+                setDeployStatus(nextStage);
+            } catch (err) {
+                if (!cancelled) {
+                    setDeployStatus('Still provisioning deployment...');
+                }
+            }
+        };
+
+        pollProgress();
+        const timer = window.setInterval(pollProgress, 2500);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [deployingSite]);
+
     const [newSite, setNewSite] = useState({
         domain: '',
         type: 'static',
@@ -54,6 +164,9 @@ const SitesPage = () => {
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
+        setCreatingSite(true);
+        setDeployProgress([]);
+        setDeployStatus('Creating site record...');
         try {
             // 1. Create DB record
             const res = await sitesApi.create(newSite);
@@ -61,15 +174,27 @@ const SitesPage = () => {
 
             // 2. Trigger async deployment provision
             if (createdSite && (createdSite.id || createdSite.ID)) {
+                const nextSite = {
+                    id: createdSite.id || createdSite.ID,
+                    domain: createdSite.domain || newSite.domain,
+                };
+                setDeployingSite(nextSite);
+                setDeployStatus('Queued deployment job...');
                 await sitesApi.deploy(createdSite.id || createdSite.ID);
             }
-
-            setShowAdd(false);
-            fetchSites();
         } catch (err: any) {
             console.error(err);
+            setCreatingSite(false);
+            setDeployingSite(null);
             alert(err.response?.data?.error || 'Failed to initialize site deployment architecture.');
         }
+    };
+
+    const closeDeployModal = () => {
+        if (creatingSite) return;
+        setDeployingSite(null);
+        setDeployProgress([]);
+        setDeployStatus('Preparing deployment...');
     };
 
     const handleAction = async (action: 'start' | 'stop' | 'restart', id: number) => {
@@ -314,12 +439,53 @@ const SitesPage = () => {
                                 </div>
 
                                 <div className="flex flex-col sm:flex-row gap-4 pt-6 pb-4">
-                                    <button type="button" onClick={() => setShowAdd(false)} className="w-full sm:w-1/3 px-6 py-5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 text-neutral-600 font-black uppercase tracking-widest text-xs transition-colors shadow-sm">Cancel</button>
-                                    <button type="submit" className="flex-1 px-6 py-5 rounded-2xl bg-black hover:bg-neutral-800 text-white font-black uppercase tracking-widest text-xs shadow-xl transition-transform active:scale-95 flex justify-center items-center gap-3">
-                                        <Globe size={18} /> Initialize Deployment
+                                    <button type="button" onClick={() => setShowAdd(false)} disabled={creatingSite} className="w-full sm:w-1/3 px-6 py-5 rounded-2xl bg-neutral-100 hover:bg-neutral-200 text-neutral-600 font-black uppercase tracking-widest text-xs transition-colors shadow-sm disabled:opacity-50">Cancel</button>
+                                    <button type="submit" disabled={creatingSite} className="flex-1 px-6 py-5 rounded-2xl bg-black hover:bg-neutral-800 text-white font-black uppercase tracking-widest text-xs shadow-xl transition-transform active:scale-95 flex justify-center items-center gap-3 disabled:opacity-70">
+                                        {creatingSite ? <RotateCw size={18} className="animate-spin" /> : <Globe size={18} />}
+                                        {creatingSite ? 'Deploying...' : 'Initialize Deployment'}
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {deployingSite && (
+                <div className="fixed inset-0 bg-neutral-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-4xl w-full shadow-2xl relative overflow-hidden max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-300">
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 className="text-3xl font-black text-black tracking-tight">Deployment Progress</h3>
+                                <p className="text-neutral-500 font-bold text-sm mt-1">{deployingSite.domain}</p>
+                            </div>
+                            <button onClick={closeDeployModal} disabled={creatingSite} className="w-10 h-10 bg-neutral-50 hover:bg-neutral-200 rounded-full flex items-center justify-center transition-colors disabled:opacity-50">
+                                <X size={20} className="text-neutral-500" />
+                            </button>
+                        </div>
+                        <div className="mb-5 rounded-2xl border border-neutral-200 bg-neutral-50 px-5 py-4">
+                            <div className="flex items-center gap-3 text-sm font-bold text-neutral-700">
+                                <RotateCw size={16} className={creatingSite ? 'animate-spin text-indigo-500' : 'text-green-600'} />
+                                {deployStatus}
+                            </div>
+                        </div>
+                        <div className="bg-black rounded-2xl p-6 overflow-y-auto flex-1 font-mono text-xs text-neutral-300 leading-relaxed shadow-inner min-h-[320px]">
+                            {deployProgress.length > 0 ? (
+                                deployProgress.map((line, i) => (
+                                    <div key={i} className={line.startsWith('ERROR') ? 'text-red-400 font-bold' : line.startsWith('OK') ? 'text-green-400' : line.startsWith('---') ? 'text-indigo-400 mt-4 font-black' : ''}>
+                                        {line}
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="flex items-center gap-2 text-indigo-400">
+                                    <RotateCw size={14} className="animate-spin" />
+                                    Waiting for git clone and deployment logs...
+                                </div>
+                            )}
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                            <button onClick={closeDeployModal} disabled={creatingSite} className="px-8 py-4 rounded-2xl bg-black text-white font-black uppercase tracking-widest text-[11px] shadow-lg disabled:opacity-50">
+                                {creatingSite ? 'Deploying...' : 'Close'}
+                            </button>
                         </div>
                     </div>
                 </div>

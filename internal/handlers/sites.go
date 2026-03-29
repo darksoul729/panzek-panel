@@ -77,9 +77,7 @@ func CreateSite(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Domain is required"})
 	}
 	
-	if site.Path == "" {
-		site.Path = site.Domain
-	}
+	site.Path = normalizeSitePath(site.Path, site.Domain)
 
 	var existing data.Site
 	if err := data.DB.Where("LOWER(domain) = ?", site.Domain).First(&existing).Error; err == nil {
@@ -126,6 +124,7 @@ func GetSiteLogs(c *fiber.Ctx) error {
 	if err := data.DB.First(&site, id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Site not found"})
 	}
+	site.Path = syncSitePath(&site)
 
 	// Try multiple naming patterns
 	patterns := []string{
@@ -232,18 +231,13 @@ func ControlSite(c *fiber.Ctx) error {
 	if err := data.DB.First(&site, id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Site not found"})
 	}
+	siteDir := syncSitePath(&site)
 
 	projectName := fmt.Sprintf("site-%d", site.ID)
 	
 	validActions := map[string]bool{"start": true, "stop": true, "restart": true}
 	if !validActions[action] {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid action"})
-	}
-
-	// Use site.Path or default to domain-based path
-	siteDir := site.Path
-	if siteDir == "" {
-		siteDir = fmt.Sprintf("/var/www/%s", site.Domain)
 	}
 
 	// Verify directory exists
